@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "fire_tv": {
+    "host": "",
+    "port": 5555,
+    "model": "REPLACE_WITH_VERIFIED_DEVICE_MODEL",
+    "name": "Living room Fire TV"
+  },
+  "clocks": {
+    "local_timezone": "UTC",
+    "local_label": "Local",
+    "secondary_timezone": "Asia/Kathmandu",
+    "secondary_label": "Kathmandu",
+    "secondary_calendar": "bikram_sambat"
+  },
+  "samsung": null
+}

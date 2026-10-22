@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher configuration. Edit this file, then run launcher/build-and-install.sh.
+  Package names: on the TV run `pm list packages` (tools/tv.py 'pm list packages').
+-->
+<resources>
+
+    <!-- Apps pinned to the dock row at the bottom, in this order. Missing apps are skipped. -->
+    <string-array name="dock_apps">
+        <item>com.netflix.ninja</item>
+        <item>com.amazon.firetv.youtube</item>
+        <item>com.disney.disneyplus</item>
+        <item>com.cbs.ott</item>
+        <item>com.hulu.plus</item>
+    </string-array>
+
+    <!-- Apps excluded from this home screen; installed apps and their data remain unchanged. -->
+    <string-array name="hidden_apps">
+        <item>com.mediatek.wwtv.tvcenter</item>
+        <item>com.mitv.gallery</item>
+        <item>me.efesser.flauncher</item>
+        <item>com.spocky.projengmenu</item>
+        <item>local.firetv.launcherhijack</item>
+        <item>com.amazon.tv.launcher</item>
+        <item>com.amazon.shoptv.firetv.client</item>
+        <item>com.amazon.firebat</item>
+        <item>com.amazon.bueller.music</item>
+    </string-array>
+
+    <!-- Tiles per row in the grid; the dock always has this many slots. -->
+    <integer name="columns">5</integer>
+</resources>

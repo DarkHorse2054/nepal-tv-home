@@ -1,0 +1,75 @@
+# Local runtime state: device addresses, configuration and authorization tokens.
+remote/state/
+remote/config.json
+remote/config.local.json
+**/samsung-token.json
+**/baseline*.json
+**/backup*/
+**/backups/
+**/recovery/
+private/
+state/
+work/
+
+# ADB authorization and platform-tools installations are never source assets.
+.android/
+**/.android/
+**/adbkey
+**/adbkey.pub
+**/adb_known_hosts.pb
+**/adb_vendor_keys
+platform-tools/
+android-tools/
+
+# Generated Android artifacts and machine-local SDK/IDE configuration.
+.gradle/
+**/.gradle/
+**/build/
+**/out/
+**/captures/
+**/local.properties
+.idea/
+*.iml
+*.apk
+*.aab
+*.apks
+*.xapk
+*.idsig
+*.dex
+
+# Signing material and secrets. Public certificates may be added deliberately.
+*.jks
+*.keystore
+*.key
+*.pem
+!launcher/app/src/test/resources/samsung-test-a.pem
+!launcher/app/src/test/resources/samsung-test-b.pem
+*.p12
+*.pfx
+*.mobileprovision
+keystore.properties
+signing.properties
+secrets.properties
+.env
+.env.*
+!.env.example
+
+# Python environments, caches, test/build outputs and local logs.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+*.pid
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Git metadata is never copied into source archives. Git itself handles .git.
+.git/

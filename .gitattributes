@@ -1,0 +1,19 @@
+* text=auto
+*.java text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.gradle text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.bat text eol=crlf
+# Preserve upstream license formatting verbatim.
+launcher/*LICENSE*.txt -whitespace
+remote/data/*LICENSE*.txt -whitespace
+*.png binary
+*.jpg binary
+*.ttf binary
+*.jar binary
