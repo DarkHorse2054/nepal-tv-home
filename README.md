@@ -15,9 +15,19 @@ A calm, dark home screen for Fire TV with Himalayan scenes, an English clock, a 
 - English San Mateo time/date and a smaller Kathmandu clock and Bikram Sambat civil date.
 - Local appearance settings, favorite-app controls and an included clock screensaver.
 - **Sources on the TV:** pair a compatible Samsung once, then use the Fire remote to choose from Samsung's input picker. No computer needed.
-- An optional local webpage remote for Fire TV and Samsung controls.
+- An optional phone/web remote with a glass D-pad, app dock, Type on TV, Samsung volume/mute/power-off, Sources and connection recovery.
 
 Netflix, YouTube, Disney+, Paramount+ and Hulu are the default favorites. Install the apps separately; subscriptions are not included.
+
+## Phone remote
+
+The redesigned companion uses a warm Himalayan theme, a floating app dock and matching sheets for typing, Samsung Sources and pairing. It supports keyboard controls, visible focus, reduced motion and narrow phone layouts. Notifications appear inside the active sheet so confirmations and errors stay visible.
+
+<img src="docs/images/remote.png" alt="Nepal Remote with Samsung controls, a sculpted directional pad and a compact app dock" width="360">
+
+*UI preview with a simulated connection. The computer must stay awake while using the real remote.*
+
+Follow [remote setup](remote/README.md) to configure your own devices and start the local server. NPL TV is an optional sixth remote shortcut; its separate app and any subscription are not included.
 
 ## Compatibility and setup
 

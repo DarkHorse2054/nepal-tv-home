@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import types
 import unittest
 from fixtures import FIRE, SAMSUNG, CLOCKS, configuration, serial
@@ -16,9 +17,10 @@ SPEC.loader.exec_module(server)
 
 
 class FakeBridge:
-    def __init__(self): self.commands = []; self.status_calls = 0
+    def __init__(self): self.commands = []; self.status_calls = 0; self.reconnect_calls = 0
     def status(self): self.status_calls += 1; return True
     def command(self, kind, value): self.commands.append((kind, value))
+    def reconnect(self): self.reconnect_calls += 1; return True
 
 
 class FakeSocket:
@@ -76,11 +78,14 @@ class RequestTests(unittest.TestCase):
         self.assertIn("frame-ancestors 'none'", headers)
 
     def test_unauthenticated_control_never_reaches_bridge(self):
-        for path, field, value in (("/api/key","key","home"),("/api/app","app","netflix")):
+        for path, field, value in (("/api/key","key","home"),("/api/app","app","netflix"),
+                                   ("/api/text","text","Kathmandu")):
             self.assertEqual(self.request("POST",path,{field:value})[0],401)
+        self.assertEqual(self.request("POST", "/api/reconnect", {})[0], 401)
         self.assertEqual(self.request(path="/api/status")[0],401)
         self.assertEqual(self.bridge.commands,[])
         self.assertEqual(self.bridge.status_calls,0)
+        self.assertEqual(self.bridge.reconnect_calls,0)
 
     def test_csrf_and_dns_rebinding_are_rejected(self):
         self.assertEqual(self.request("POST","/api/key",{"key":"ok"},auth=True,
@@ -133,6 +138,59 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(self.request("POST","/api/key",{"key":"up"},auth=True,
             headers=[("+Authorization","Bearer "+self.token)])[0],400)
         self.assertEqual(self.bridge.commands,[])
+
+    def test_manifest_static_mime_and_content_policy(self):
+        manifest = '{"name":"Nepal Remote","start_url":"/"}'
+        (self.dist / "manifest.webmanifest").write_text(manifest)
+        code, headers, content = self.request(path="/manifest.webmanifest")
+        self.assertEqual((code, content.decode()), (200, manifest))
+        self.assertIn("Content-Type: application/manifest+json; charset=utf-8", headers)
+        self.assertIn("manifest-src 'self'", headers)
+
+    def test_text_validation_and_private_response(self):
+        text = "Nepal's NPL %s; $(id) `id` \\\" & | < > %"
+        code, _, content = self.request("POST", "/api/text", {"text": text}, auth=True)
+        self.assertEqual((code, json.loads(content)), (200, {"ok": True}))
+        self.assertNotIn(text.encode(), content)
+        self.assertEqual(self.bridge.commands, [("text", text)])
+        self.assertEqual(self.request("POST", "/api/text", {"text": "x" * 160}, auth=True)[0], 200)
+        before = list(self.bridge.commands)
+        for text, error in (("", "invalid_text_length"), ("x" * 161, "invalid_text_length"),
+                            ("%s" * 4, "split_text_required"),
+                            ("नेपाल", "unsupported_text_character"),
+                            ("name\npassword", "unsupported_text_character"),
+                            ("\r", "unsupported_text_character"), ("\t", "unsupported_text_character"),
+                            ("\x00", "unsupported_text_character"), ("\x7f", "unsupported_text_character")):
+            code, _, content = self.request("POST", "/api/text", {"text": text}, auth=True)
+            self.assertEqual((code, json.loads(content)), (400, {"error": error}))
+        for payload in ({"text": 123}, {"text": None}, {"text": ["hello"]},
+                        {"text": "hello", "serial": "other-tv"}, {"command": "id"}):
+            self.assertEqual(self.request("POST", "/api/text", payload, auth=True)[0], 400)
+        self.assertEqual(self.bridge.commands, before)
+
+    def test_text_and_reconnect_require_same_origin_host_and_auth(self):
+        for path, payload in (("/api/text", {"text": "hello"}), ("/api/reconnect", {})):
+            for header, expected in ((("Origin", "http://attacker.example"), 403),
+                                     (("Origin", "null"), 403),
+                                     (("Host", "attacker.example:8765"), 421),
+                                     (("Sec-Fetch-Site", "cross-site"), 403)):
+                self.assertEqual(self.request("POST", path, payload, auth=True, headers=[header])[0], expected)
+            self.assertEqual(self.request(path=path, auth=True)[0], 404)
+            self.assertEqual(self.request("PUT", path, payload, auth=True)[0], 405)
+        self.assertEqual(self.bridge.commands, [])
+        self.assertEqual(self.bridge.reconnect_calls, 0)
+
+    def test_reconnect_payload_and_fixed_new_actions(self):
+        for payload in ({"serial": "192.168.1.200:5555"}, {"force": True}, []):
+            self.assertEqual(self.request("POST", "/api/reconnect", payload, auth=True)[0], 400)
+        self.assertEqual(self.request("POST", "/api/reconnect", auth=True, body=b"null")[0], 400)
+        code, _, content = self.request("POST", "/api/reconnect", {}, auth=True)
+        self.assertEqual((code, json.loads(content)), (200, {"ok": True, "online": True}))
+        self.assertEqual(self.bridge.reconnect_calls, 1)
+        for key in ("enter", "delete"):
+            self.assertEqual(self.request("POST", "/api/key", {"key": key}, auth=True)[0], 200)
+        self.assertEqual(self.request("POST", "/api/app", {"app": "npl"}, auth=True)[0], 200)
+        self.assertEqual(self.bridge.commands, [("key", "enter"), ("key", "delete"), ("app", "npl")])
 
 
 class PairingTests(unittest.TestCase):
@@ -217,6 +275,126 @@ class BridgeTests(unittest.TestCase):
         bridge.command("key","up")
         self.assertEqual(budgets,[1,1,4])
         self.assertLess(sum(budgets),8)
+
+    def test_text_is_one_fixed_target_command_with_safe_remote_shell_parsing(self):
+        # Execute only a local stub named input. An actual POSIX shell, rather
+        # than a second quoting implementation, verifies all metacharacters.
+        samples = ["hello  world ", "literal %s and %%s %ss % s", "'\"\\$`;&|<>(){}[]!*?#~",
+                   "'; exit 99; #", '$(printf injected) `printf injected`', "x" * 160,
+                   " " * 160, "%s" * 3]
+        for text in samples:
+            self.calls.clear()
+            bridge = server.AdbBridge("/tmp/adb", FIRE, runner=self.runner)
+            bridge.command("text", text)
+            argv = self.calls[-1]
+            self.assertEqual(argv[1:4], ["-s", serial(), "shell"])
+            self.assertEqual(len(argv), 5)
+            result = subprocess.run(["/bin/sh", "-c",
+                'input() { printf "%s\\0" "$@"; };\n' + argv[-1]],
+                capture_output=True, check=True)
+            arguments = result.stdout.decode().split("\x00")[:-1]
+            self.assertEqual(arguments[::2], ["text"] * (len(arguments) // 2))
+            self.assertEqual("".join(part.replace("%s", " ") for part in arguments[1::2]), text)
+            self.assertEqual(len(self.calls), 3)  # state, identity, one send; no replay
+
+    def test_text_split_budget_rejects_before_any_tv_io(self):
+        for text in ("%s" * 4, "%s" * 80):
+            bridge = server.AdbBridge("/tmp/adb", FIRE, runner=self.runner)
+            with self.assertRaises(server.ApiError) as caught:
+                bridge.command("text", text)
+            self.assertEqual((caught.exception.status, caught.exception.code), (400, "split_text_required"))
+            self.assertEqual(bridge.control_rate.events, {})
+        self.assertEqual(self.calls, [])
+
+    def test_text_failure_is_uncertain_and_never_retried_or_echoed(self):
+        for failure in ("timeout", "exit", "exception"):
+            calls = []
+            def fail_send(argv, **kwargs):
+                calls.append(argv)
+                if argv[-1] == "get-state":
+                    return types.SimpleNamespace(returncode=0, stdout="device")
+                if argv[-1] == "ro.product.model":
+                    return types.SimpleNamespace(returncode=0, stdout=FIRE["model"])
+                if failure == "timeout":
+                    raise subprocess.TimeoutExpired(argv, 4)
+                return types.SimpleNamespace(returncode=1 if failure == "exit" else 0,
+                                             stdout="Exception: sent content")
+            bridge = server.AdbBridge("/tmp/adb", FIRE, runner=fail_send)
+            with self.assertRaises(server.ApiError) as caught:
+                bridge.command("text", "private input")
+            self.assertEqual((caught.exception.status, caught.exception.code), (503, "text_send_uncertain"))
+            self.assertEqual(len(calls), 3)
+            self.assertNotIn("private input", str(caught.exception))
+            self.assertFalse(bridge.command_lock.locked())
+
+    def test_text_rejected_before_io_and_obeys_identity_guard(self):
+        for text in ("", "x" * 161, "\n", "é", "\x7f"):
+            bridge = server.AdbBridge("/tmp/adb", FIRE, runner=self.runner)
+            with self.assertRaises(server.ApiError):
+                bridge.command("text", text)
+        self.assertEqual(self.calls, [])
+        def wrong_tv(argv, **kwargs):
+            self.calls.append(argv)
+            return types.SimpleNamespace(returncode=0, stdout="device" if argv[-1] == "get-state" else "OTHER")
+        bridge = server.AdbBridge("/tmp/adb", FIRE, runner=wrong_tv)
+        with self.assertRaises(server.ApiError):
+            bridge.command("text", "hello")
+        self.assertFalse(any("input text" in arg for call in self.calls for arg in call))
+
+    def test_reconnect_is_serialized_and_model_guarded_without_replaying_inputs(self):
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+        def blocking_runner(argv, **kwargs):
+            calls.append(argv)
+            if argv[-1] == "get-state":
+                entered.set()
+                self.assertTrue(release.wait(2))
+                output = "device"
+            else:
+                output = FIRE["model"]
+            return types.SimpleNamespace(returncode=0, stdout=output)
+        bridge = server.AdbBridge("/tmp/adb", FIRE, runner=blocking_runner)
+        results = []
+        worker = threading.Thread(target=lambda: results.append(bridge.reconnect()))
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(2))
+            for operation in (lambda: bridge.command("text", "hello"),
+                              lambda: bridge.command("key", "ok"), bridge.reconnect):
+                with self.assertRaises(server.ApiError) as caught:
+                    operation()
+                self.assertEqual(caught.exception.code, "control_busy")
+        finally:
+            release.set()
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [True])
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(any("input" in call for call in calls))
+        self.assertFalse(bridge.command_lock.locked())
+
+    def test_reconnect_bounded_fixed_target_and_throttle(self):
+        now = [0.0]
+        budgets = []
+        def offline(argv, **kwargs):
+            self.calls.append(argv)
+            budgets.append(kwargs["timeout"])
+            return types.SimpleNamespace(returncode=1, stdout="offline")
+        bridge = server.AdbBridge("/tmp/adb", FIRE, runner=offline, clock=lambda: now[0])
+        self.assertFalse(bridge.reconnect())
+        self.assertEqual(sum(budgets), 4)
+        self.assertEqual([call[1:] for call in self.calls if call[1] == "connect"],
+                         [["connect", serial()]])
+        for _ in range(7):
+            self.assertFalse(bridge.reconnect())
+        with self.assertRaises(server.ApiError) as caught:
+            bridge.reconnect()
+        self.assertEqual(caught.exception.code, "control_rate_limited")
+        self.assertEqual(sum("connect" == call[1] for call in self.calls), 1)
+        self.assertFalse(any("disconnect" in call for call in self.calls))
+        def wrong_model(argv, **kwargs):
+            return types.SimpleNamespace(returncode=0, stdout="device" if argv[-1] == "get-state" else "OTHER")
+        self.assertFalse(server.AdbBridge("/tmp/adb", FIRE, runner=wrong_model).reconnect())
 
 
 class CalendarTests(unittest.TestCase):

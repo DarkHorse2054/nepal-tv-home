@@ -1,6 +1,10 @@
 # Local Fire TV remote
 
+The UI/UX Pro Max redesign uses a warm charcoal Himalayan theme, a sculpted glass directional pad, a compact floating app dock, and clear Samsung / Fire TV control groups. App names appear on focus, hover or press; small screens reflow to named tiles. Typing, Sources, pairing and settings share matching sheets with visible in-sheet action feedback. See [the design system](DESIGN.md) for guidance, tokens and verification limits.
+
 The companion server supports macOS/Linux with POSIX private-file checks; a phone or browser on any platform can use it on the same LAN. Keep the computer awake, the Fire TV powered, and ADB authorized. This repository does not include personal addresses, saved authorizations, or a configured TV.
+
+The phone interface includes a compact glass directional pad, navigation/playback keys, six app shortcuts and sheets for typing, Samsung Sources and connection settings. It distinguishes an unavailable Mac, an offline Fire TV and an expired pairing session. Reconnect checks the configured target without replaying commands. On especially narrow screens, app shortcuts use two rows to preserve touch targets.
 
 ## Configure before starting
 
@@ -58,9 +62,9 @@ Authorizations are saved as `remote/state/samsung-<target-fingerprint>.json` wit
 
 Status reads local token/runtime authorization state only; it is not a live Samsung connection probe. Rejected authorization keeps the connection UI unpaired until explicit pairing succeeds. Pairing is limited to one request per minute, with a separate Samsung lock; Fire TV controls keep working during the approval wait.
 
-The Samsung panel sits above Fire TV controls and remains usable when Fire TV is offline. Volume up/down, mute and explicit Power off are fixed clicks; no power toggle, power-on, Wake-on-LAN or automatic retry is included. A sleeping panel may be unreachable, so use its physical remote to wake it for testing.
+The compact Samsung strip sits above Fire TV controls and remains usable when Fire TV is offline. Volume up/down, mute and explicit Power off are fixed clicks; no power toggle, power-on, Wake-on-LAN or automatic retry is included. A sleeping panel may be unreachable, so use its physical remote to wake it for testing.
 
-Sources opens a foldout with Open Sources and Up/Down/Left/Right/OK/Back navigation. A second foldout contains **experimental** discrete HDMI 1-4 key tests. These keys are not established as working on the recorded TU7000 firmware, and 3/4 may not correspond to physical sockets. Watch the TV after each test. No Source-menu macro, current-input readback or Samsung screenshot API is implemented. See [the observed-test procedure](SAMSUNG-CONTROLS.md).
+Sources opens a sheet with Open Sources and Up/Down/Left/Right/OK/Back navigation. Close/Escape dismisses the phone sheet; Back on Samsung sends the TV's Return key. **Experimental** discrete HDMI 1-4 keys remain in the API/helper only, outside the normal interface. These keys are not established as working on the recorded TU7000 firmware, and 3/4 may not correspond to physical sockets. No Source-menu macro, current-input readback or Samsung screenshot API is implemented. See [the observed-test procedure](SAMSUNG-CONTROLS.md).
 
 The UI says **Last sent**, never Active. This memory-only entry changes only after a successful WebSocket write and resets when the server restarts. It is not a TV acknowledgement, an input-selection result or persistent device state. Status reads this entry and the local token file without opening a Samsung connection.
 
@@ -76,6 +80,8 @@ python3 -B remote/samsung.py --config remote/state/config.json nav hdmi1
 
 ## API and behavior
 
+**Type on TV** sends 1–160 printable ASCII characters to the currently selected television field. English letters, numbers, spaces and standard symbols are supported. Unicode, emoji, line breaks and control characters are rejected before device I/O; unusually complex symbol sequences can require smaller parts. Text is quoted for Android's remote shell and is not logged, echoed by the API or retained by this companion. The receiving TV app/platform handles its own storage. The phone field locks while sending, clears after acknowledgement and retains an uncertain draft until the user checks the TV or closes the sheet. Closing discards the draft. There is no automatic text retry. Delete and Enter are separate one-key actions.
+
 Every POST requires same-origin Origin, JSON and the paired webpage bearer token, except `/api/pair`, which takes the terminal PIN. No CORS access is granted.
 
 | Request | Exact body | Meaning |
@@ -84,10 +90,16 @@ Every POST requires same-origin Origin, JSON and the paired webpage bearer token
 | GET /api/status | none | Fire TV availability, configured labels/dates, local Samsung authorization state |
 | POST /api/key | `{"key":"home"}` | One allowlisted Fire TV key |
 | POST /api/app | `{"app":"paramount"}` | Launch one fixed known app component |
+| POST /api/text | `{"text":"Kathmandu"}` | Send bounded text once to the selected field |
+| POST /api/reconnect | `{}` | Check the configured Fire TV; returns `{ok:true,online:boolean}` |
 | POST /api/samsung/pair | `{}` | Explicit bounded Samsung approval request |
 | POST /api/samsung/key | `{"key":"source"}` | One allowlisted Samsung panel/navigation/test click |
 
-Fire TV keys: `up`, `down`, `left`, `right`, `ok`, `home`, `back`, `menu`, `play_pause`, `rewind`, `fast_forward`, `wake`, `sleep`. App aliases remain the fixed initial set: Netflix, YouTube, Disney+, Paramount+, Hulu. Components can differ across firmware or app versions; a launch failure does not install an app or retry an arbitrary component.
+Fire TV keys: `up`, `down`, `left`, `right`, `ok`, `home`, `back`, `menu`, `play_pause`, `rewind`, `fast_forward`, `wake`, `sleep`, `enter`, `delete`. App aliases: `netflix`, `youtube`, `disney`, `paramount`, `hulu`, `npl`. The NPL alias targets the independent `app.nepal.npltv` app, which must be installed separately and requires the user's own provider account/subscription. Components can differ across firmware or app versions; a launch failure does not install an app or retry an arbitrary component.
+
+Text errors include `invalid_text_length`, `unsupported_text_character`, `split_text_required` and `text_send_uncertain`. The last means some or all text may have arrived, so check the TV before retrying. Queued inputs expire after a short deadline and are invalidated on blur, hiding, disconnect or sheet transitions; releasing a held key cancels its queued repeats. Reconnect never replays previous controls.
+
+A manifest and original local icon support browser bookmarking. The plain-HTTP LAN service has no service worker or offline-control support. Browser sessions expire after eight hours or a server restart; a manifest does not change that behavior.
 
 Samsung keys: `source`, `up`, `down`, `left`, `right`, `ok`, `back`, `volume_up`, `volume_down`, `mute`, `power_off`, `hdmi1`, `hdmi2`, `hdmi3`, `hdmi4`. Raw `KEY_*` strings, arbitrary command bodies and generic `power` are rejected. Pairing can return authorized or pending; pending is not approval. Sends return `state:"sent"`, `key`, `sentAt`, `experimental` and `inputVerified:false`; HDMI tests have `experimental:true`. Status adds `sourceLabels` and `lastSent`, while `directHdmi` and `sourceReadback` remain false. The backend permits at most eight Fire TV controls or four Samsung controls per second, using separate locks. This is a request ceiling, not a recommended hardware cadence. Run observed HDMI tests one at a time, leaving several seconds to see the result. Failed inputs are not automatically retried.
 
@@ -99,6 +111,7 @@ Date status includes `localDate`, `localTime`, `localLabel`, `secondaryDate`, `s
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s remote/tests -v
+node --test remote/tests/test_frontend.js
 ```
 
 Tests use synthetic private addresses, in-memory HTTP sockets and fake device clients. They do not bind a listener, discover devices or contact a TV. Coverage includes configuration/permissions, identity gates, token binding, authentication, Host/Origin checks, payload limits, path containment, command allowlists, concurrency/rates, timeout budgets and calendar boundaries.

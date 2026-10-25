@@ -3,149 +3,143 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0a101c">
+  <meta name="theme-color" content="#131918">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="A simple remote for your Nepal Fire TV, on your home network.">
-  <title>Nepal · Fire TV remote</title>
+  <meta name="description" content="Your Nepal Home remote. Simple TV controls on your home network.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Nepal Remote">
+  <title>Nepal Remote</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/assets/remote-icon.svg">
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
-    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
-    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
-    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
-    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10H7V10m3 10v-7h4v7"/></symbol>
-    <symbol id="i-back" viewBox="0 0 24 24"><path d="m10 5-7 7 7 7M4 12h11a6 6 0 0 1 6 6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m7 14 5-5 5 5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m14 7-5 5 5 5"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m10 7 5 5-5 5"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3.5 10 8.5-7 8.5 7M5 9v11h5v-6h4v6h5V9"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m10 5-7 7 7 7M4 12h11a5 5 0 0 1 5 5"/></symbol>
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/></symbol>
-    <symbol id="i-play-pause" viewBox="0 0 24 24"><path d="m4 5 9 7-9 7ZM16 5v14M21 5v14"/></symbol>
+    <symbol id="i-play-pause" viewBox="0 0 24 24"><path d="m4 5 9 7-9 7ZM17 5v14M21 5v14"/></symbol>
     <symbol id="i-rewind" viewBox="0 0 24 24"><path d="m12 6-9 6 9 6Zm9 0-9 6 9 6Z"/></symbol>
     <symbol id="i-forward" viewBox="0 0 24 24"><path d="m3 6 9 6-9 6Zm9 0 9 6-9 6Z"/></symbol>
-    <symbol id="i-wake" viewBox="0 0 24 24"><path d="M12 3v8M7 5a8 8 0 1 0 10 0"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8M7 5a8 8 0 1 0 10 0"/></symbol>
     <symbol id="i-sleep" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z"/></symbol>
-    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 18 17"/></symbol>
-    <symbol id="i-link" viewBox="0 0 24 24"><path d="m9 15 6-6M8 16l-1 1a4.2 4.2 0 0 1-6-6l4-4a4.2 4.2 0 0 1 6 0m2 10a4.2 4.2 0 0 0 6 0l4-4a4.2 4.2 0 0 0-6-6l-1 1" transform="translate(1 0) scale(.92)"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 5v6h-6M4 19v-6h6M6 7a7 7 0 0 1 11-1l3 5M4 13l3 5a7 7 0 0 0 11-1"/></symbol>
     <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9h.1M10 9h.1M14 9h.1M18 9h.1M6 12h.1M10 12h.1M14 12h.1M18 12h.1M7 15h10"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M10 5 5 9H2v6h3l5 4ZM15 9l7 6m0-6-7 6"/></symbol>
+    <symbol id="i-source" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="3"/><path d="M8 22h8M12 18v4M7 11h10m-3-3 3 3-3 3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
-    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4ZM15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></symbol>
-    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4ZM16 9l6 6m0-6-6 6"/></symbol>
   </svg>
 
   <main class="remote-shell">
     <header class="page-header">
-      <div class="identity">
-        <span class="om" lang="sa" aria-label="Om">ॐ</span>
-        <div><h1>Nepal</h1><p id="nepal-date" class="nepal-date">Fire TV remote</p></div>
-      </div>
-      <button id="connection-button" class="connection-pill" type="button" aria-label="Check Fire TV connection">
-        <span class="status-dot" aria-hidden="true"></span><span id="connection-label" aria-live="polite">Pair remote</span>
-        <svg class="icon icon-small" aria-hidden="true"><use href="#i-refresh"/></svg>
-      </button>
+      <div class="identity"><span class="om" lang="sa" aria-label="Om">ॐ</span><div><p class="brand-overline">NEPAL HOME</p><h1>Remote<span class="sr-only"> control</span></h1></div></div>
+      <button id="connection-button" class="connection-pill" type="button" aria-label="Connection details"><span class="status-dot" aria-hidden="true"></span><span id="connection-label">Pair remote</span></button>
     </header>
+    <div class="date-line"><span class="date-rule" aria-hidden="true"></span><p id="nepal-date">A little closer to home</p></div>
 
-    <div class="remote-layout">
-      <section class="samsung-panel glass-panel" id="samsung-panel" hidden aria-labelledby="samsung-title">
-        <div class="samsung-heading"><h2 id="samsung-title">Samsung TV</h2><span class="section-detail">PANEL CONTROLS</span></div>
-        <div class="samsung-volume-row" role="group" aria-label="Samsung volume and power">
-          <button class="control samsung-volume" data-samsung="volume_down" type="button" disabled aria-label="Samsung volume down"><svg class="icon" aria-hidden="true"><use href="#i-volume"/></svg><span>−</span></button>
-          <button class="control samsung-volume" data-samsung="mute" type="button" disabled aria-label="Mute or unmute Samsung"><svg class="icon" aria-hidden="true"><use href="#i-mute"/></svg><span>Mute</span></button>
-          <button class="control samsung-volume" data-samsung="volume_up" type="button" disabled aria-label="Samsung volume up"><svg class="icon" aria-hidden="true"><use href="#i-volume"/></svg><span>+</span></button>
-          <button class="control samsung-power" data-samsung="power_off" type="button" disabled aria-label="Power off Samsung TV"><svg class="icon" aria-hidden="true"><use href="#i-wake"/></svg><span>Power off</span></button>
-        </div>
-        <div class="samsung-connection"><p id="samsung-message" aria-live="polite">Connect once and select Allow on your Samsung.</p><button id="samsung-pair" class="control samsung-connect" type="button" disabled>Connect Samsung</button></div>
-        <p id="samsung-last-sent" class="samsung-last-sent" aria-live="polite" hidden></p>
-        <details class="samsung-sources">
-          <summary><span>Sources</span><svg class="icon icon-small" aria-hidden="true"><use href="#i-down"/></svg></summary>
-          <div class="samsung-source-content">
-            <button class="control samsung-source" data-samsung="source" type="button" disabled>Open Sources</button>
-            <div class="samsung-pad" role="group" aria-label="Samsung source menu navigation">
-              <button class="control samsung-up" data-samsung="up" type="button" disabled aria-label="Samsung up"><svg class="icon" aria-hidden="true"><use href="#i-up"/></svg></button>
-              <button class="control samsung-left" data-samsung="left" type="button" disabled aria-label="Samsung left"><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
-              <button class="control samsung-ok" data-samsung="ok" type="button" disabled aria-label="Samsung select">OK</button>
-              <button class="control samsung-right" data-samsung="right" type="button" disabled aria-label="Samsung right"><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
-              <button class="control samsung-down" data-samsung="down" type="button" disabled aria-label="Samsung down"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg></button>
-            </div>
-            <button class="control samsung-back" data-samsung="back" type="button" disabled>Back on Samsung</button>
-            <details class="samsung-hdmi-tests">
-              <summary>Experimental HDMI tests</summary>
-              <p>Watch the TV after each test. Keys may be ignored; the remote cannot verify the selected input. HDMI 3 / 4 are protocol tests and may not be physical ports on your TV.</p>
-              <div class="samsung-hdmi-row" role="group" aria-label="Experimental Samsung HDMI key tests">
-                <button class="control" data-samsung="hdmi1" type="button" disabled>HDMI 1</button>
-                <button class="control" data-samsung="hdmi2" type="button" disabled>HDMI 2</button>
-                <button class="control" data-samsung="hdmi3" type="button" disabled>HDMI 3</button>
-                <button class="control" data-samsung="hdmi4" type="button" disabled>HDMI 4</button>
-              </div>
-            </details>
-          </div>
-        </details>
-      </section>
-      <section class="controller glass-panel" aria-label="Fire TV controls">
-        <div class="controller-heading"><div><p class="eyebrow">YOUR FIRE TV</p><h2 id="device-name">Living room</h2></div><span id="device-model" class="device-model">REMOTE</span></div>
-        <div class="navigation-row">
-          <button class="control navigation-key" data-key="home" type="button" disabled aria-label="Home" title="Home · H"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span>Home</span></button>
-          <button class="control navigation-key" data-key="back" type="button" disabled aria-label="Back" title="Back · Escape"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg><span>Back</span></button>
-          <button class="control navigation-key" data-key="menu" type="button" disabled aria-label="Menu" title="Menu · M"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg><span>Menu</span></button>
-        </div>
+    <section id="connection-banner" class="connection-banner" aria-label="Connection status">
+      <div><p id="status-title">Make yourself at home</p><p id="status-message" aria-live="polite">Pair with the code shown on your Mac.</p><p id="last-seen" hidden></p></div>
+      <button id="reconnect-button" class="small-action" type="button">Pair</button>
+    </section>
 
-        <div class="direction-pad" role="group" aria-label="Directional pad">
-          <span class="pad-orbit" aria-hidden="true"></span>
-          <button class="direction direction-up" data-key="up" data-repeat type="button" disabled aria-label="Up" title="Up arrow"><svg class="icon" aria-hidden="true"><use href="#i-up"/></svg></button>
-          <button class="direction direction-left" data-key="left" data-repeat type="button" disabled aria-label="Left" title="Left arrow"><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
-          <button class="direction direction-ok" data-key="ok" type="button" disabled aria-label="OK, select" title="Select · Enter"><span>OK</span></button>
-          <button class="direction direction-right" data-key="right" data-repeat type="button" disabled aria-label="Right" title="Right arrow"><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
-          <button class="direction direction-down" data-key="down" data-repeat type="button" disabled aria-label="Down" title="Down arrow"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg></button>
-        </div>
+    <section id="samsung-panel" class="tv-strip" aria-label="Samsung TV controls" hidden>
+      <div class="tv-strip-heading"><span>Samsung TV</span><span class="section-label">DISPLAY</span></div>
+      <div class="tv-strip-controls">
+        <button class="strip-key power-key" data-samsung="power_off" type="button" disabled aria-label="Power off Samsung TV" title="Power off Samsung"><svg class="icon" aria-hidden="true"><use href="#i-power"/></svg></button>
+        <div class="volume-control" role="group" aria-label="Samsung volume"><button class="strip-key" data-samsung="volume_down" type="button" disabled aria-label="Samsung volume down"><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button><span>VOL</span><button class="strip-key" data-samsung="volume_up" type="button" disabled aria-label="Samsung volume up"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></div>
+        <button class="strip-key" data-samsung="mute" type="button" disabled aria-label="Mute or unmute Samsung" title="Mute"><svg class="icon" aria-hidden="true"><use href="#i-mute"/></svg></button>
+        <button id="sources-button" class="strip-key sources-key" type="button" disabled aria-label="Samsung sources" title="Sources"><svg class="icon" aria-hidden="true"><use href="#i-source"/></svg></button>
+      </div>
+    </section>
 
-        <div class="media-row" role="group" aria-label="Playback controls">
-          <button class="control media-key" data-key="rewind" data-repeat type="button" disabled aria-label="Rewind" title="Rewind · R"><svg class="icon" aria-hidden="true"><use href="#i-rewind"/></svg></button>
-          <button class="control media-key play-key" data-key="play_pause" type="button" disabled aria-label="Play or pause" title="Play or pause · Space"><svg class="icon" aria-hidden="true"><use href="#i-play-pause"/></svg></button>
-          <button class="control media-key" data-key="fast_forward" data-repeat type="button" disabled aria-label="Fast forward" title="Fast forward · F"><svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg></button>
-        </div>
-        <div class="power-row">
-          <button class="control power-key" data-key="wake" type="button" disabled aria-label="Wake Fire TV"><svg class="icon" aria-hidden="true"><use href="#i-wake"/></svg><span>Wake Fire TV</span></button>
-          <button class="control power-key" data-key="sleep" type="button" disabled aria-label="Sleep Fire TV"><svg class="icon" aria-hidden="true"><use href="#i-sleep"/></svg><span>Sleep Fire TV</span></button>
-        </div>
-      </section>
+    <section class="controller" aria-label="Fire TV remote">
+      <div class="controller-heading"><span id="device-name">Living room</span><span class="section-label">FIRE TV</span></div>
+      <div class="direction-pad" role="group" aria-label="Directional pad">
+        <span class="pad-orbit" aria-hidden="true"></span>
+        <button class="direction direction-up" data-key="up" data-repeat type="button" disabled aria-label="Up"><svg class="icon" aria-hidden="true"><use href="#i-up"/></svg></button>
+        <button class="direction direction-left" data-key="left" data-repeat type="button" disabled aria-label="Left"><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
+        <button class="direction direction-ok" data-key="ok" type="button" disabled aria-label="OK, select"><span>OK</span><span class="select-label" aria-hidden="true">SELECT</span></button>
+        <button class="direction direction-right" data-key="right" data-repeat type="button" disabled aria-label="Right"><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
+        <button class="direction direction-down" data-key="down" data-repeat type="button" disabled aria-label="Down"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg></button>
+      </div>
+      <div class="navigation-row" role="group" aria-label="Navigation">
+        <button class="control navigation-key" data-key="back" type="button" disabled aria-label="Back"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg><span>Back</span></button>
+        <button class="control navigation-key home-key" data-key="home" type="button" disabled aria-label="Home"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span>Home</span></button>
+        <button class="control navigation-key" data-key="menu" type="button" disabled aria-label="Menu"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg><span>Menu</span></button>
+      </div>
+      <div class="media-row" role="group" aria-label="Playback">
+        <button class="control media-key" data-key="rewind" data-repeat type="button" disabled aria-label="Rewind"><svg class="icon" aria-hidden="true"><use href="#i-rewind"/></svg></button>
+        <button class="control media-key play-key" data-key="play_pause" type="button" disabled aria-label="Play or pause"><svg class="icon" aria-hidden="true"><use href="#i-play-pause"/></svg></button>
+        <button class="control media-key" data-key="fast_forward" data-repeat type="button" disabled aria-label="Fast forward"><svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg></button>
+      </div>
+    </section>
 
-      <aside class="companion-column">
-        <section class="apps-panel glass-panel" aria-labelledby="apps-title">
-          <div class="section-heading"><h2 id="apps-title">Your favorites</h2><span class="section-detail">OPEN ON TV</span></div>
-          <div class="app-dock">
-            <button class="app-button" data-app="netflix" type="button" disabled aria-label="Open Netflix"><span class="app-icon netflix" aria-hidden="true">N</span><span>Netflix</span></button>
-            <button class="app-button" data-app="youtube" type="button" disabled aria-label="Open YouTube"><span class="app-icon youtube" aria-hidden="true"><svg viewBox="0 0 48 34"><rect x="1" y="1" width="46" height="32" rx="9"/><path d="m20 10 12 7-12 7Z"/></svg></span><span>YouTube</span></button>
-            <button class="app-button" data-app="disney" type="button" disabled aria-label="Open Disney Plus"><span class="app-icon disney" aria-hidden="true">Disney<span>+</span></span><span>Disney+</span></button>
-            <button class="app-button" data-app="paramount" type="button" disabled aria-label="Open Paramount Plus"><span class="app-icon paramount" aria-hidden="true"><svg viewBox="0 0 48 26"><path d="m4 24 18-21 5 6 3-2 14 17Z"/><path d="m17 13 5-10 5 6-4-1-2 6Z"/></svg><span>Paramount+</span></span><span>Paramount+</span></button>
-            <button class="app-button" data-app="hulu" type="button" disabled aria-label="Open Hulu"><span class="app-icon hulu" aria-hidden="true">hulu</span><span>Hulu</span></button>
-          </div>
-        </section>
-        <section class="connection-note" aria-label="Connection information">
-          <span class="note-line" aria-hidden="true"></span>
-          <p id="status-message">Pair once to control your Fire TV from here.</p>
-          <p id="kathmandu-time" class="kathmandu-time"></p>
-        </section>
-        <details class="keyboard-help">
-          <summary><svg class="icon icon-small" aria-hidden="true"><use href="#i-keyboard"/></svg> Keyboard shortcuts</summary>
-          <div class="shortcut-list"><span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> Navigate</span><span><kbd>Enter</kbd> Select</span><span><kbd>Esc</kbd> Back</span><span><kbd>Space</kbd> Play / pause</span><span><kbd>H</kbd> Home</span><span><kbd>M</kbd> Menu</span></div>
-        </details>
-      </aside>
-    </div>
-
-    <footer class="page-footer"><span>On your home network</span><button id="pairing-button" type="button"><svg class="icon icon-small" aria-hidden="true"><use href="#i-link"/></svg>Pairing</button></footer>
+    <section class="apps-panel" aria-label="Open an app on Fire TV">
+      <div class="app-dock">
+        <button class="app-button" data-app="netflix" type="button" disabled aria-label="Open Netflix" title="Netflix"><span class="app-icon netflix"><img src="/assets/netflix.png" width="25" height="35" alt="" draggable="false"></span><span>Netflix</span></button>
+        <button class="app-button" data-app="youtube" type="button" disabled aria-label="Open YouTube" title="YouTube"><span class="app-icon youtube"><img src="/assets/youtube.png" width="33" height="25" alt="" draggable="false"></span><span>YouTube</span></button>
+        <button class="app-button" data-app="disney" type="button" disabled aria-label="Open Disney Plus"><span class="app-icon disney" aria-hidden="true">Disney<span>+</span></span><span>Disney+</span></button>
+        <button class="app-button" data-app="paramount" type="button" disabled aria-label="Open Paramount Plus" title="Paramount+"><span class="app-icon paramount" aria-hidden="true">P<span>+</span></span><span>Paramount+</span></button>
+        <button class="app-button" data-app="hulu" type="button" disabled aria-label="Open Hulu"><span class="app-icon hulu" aria-hidden="true">hulu</span><span>Hulu</span></button>
+        <button class="app-button" data-app="npl" type="button" disabled aria-label="Open NPL TV"><span class="app-icon npl" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m11 8 14 8-14 8Z"/><circle cx="16" cy="16" r="13"/></svg><span>NPL</span></span><span>NPL TV</span></button>
+      </div>
+    </section>
+    <footer class="page-footer">
+      <button id="type-button" class="footer-key" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>Type on TV</button>
+      <button id="settings-button" class="footer-key" type="button"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
+    </footer>
+    <p id="kathmandu-time" class="quiet-time"></p>
   </main>
 
-  <dialog id="pair-dialog" class="pair-dialog" aria-labelledby="pair-title" aria-describedby="pair-description">
-    <button id="pair-close" class="pair-close" type="button" aria-label="Close pairing" hidden><svg class="icon icon-small" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
-    <div class="pair-symbol om" lang="sa" aria-hidden="true">ॐ</div>
-    <p class="eyebrow">NEPAL REMOTE</p><h2 id="pair-title">Pair your remote.</h2>
-    <p id="pair-description">Enter the 6-digit PIN shown in the terminal running your remote.</p>
-    <form id="pair-form">
-      <label for="pair-pin">Pairing PIN</label>
-      <input id="pair-pin" name="pin" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required aria-describedby="pair-error">
-      <p id="pair-error" class="pair-error" role="alert"></p>
-      <button id="pair-submit" class="pair-submit" type="submit">Connect remote<svg class="icon icon-small" aria-hidden="true"><use href="#i-right"/></svg></button>
-    </form>
-    <p class="pair-footnote">No account. Just your Fire TV.</p>
+  <dialog id="sources-dialog" class="sheet" aria-labelledby="sources-title">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">SAMSUNG TV</p><h2 id="sources-title">Sources</h2></div><button class="close-button" data-close type="button" aria-label="Close sources"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="sources-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <p class="sheet-description">Open the TV’s source menu, then use these controls to choose an input.</p>
+    <button class="primary-button" data-samsung="source" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-source"/></svg>Open Sources</button>
+    <div class="samsung-pad" role="group" aria-label="Samsung source menu navigation">
+      <button class="control samsung-up" data-samsung="up" type="button" disabled aria-label="Samsung up"><svg class="icon" aria-hidden="true"><use href="#i-up"/></svg></button><button class="control samsung-left" data-samsung="left" type="button" disabled aria-label="Samsung left"><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button><button class="control samsung-ok" data-samsung="ok" type="button" disabled aria-label="Samsung select">OK</button><button class="control samsung-right" data-samsung="right" type="button" disabled aria-label="Samsung right"><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button><button class="control samsung-down" data-samsung="down" type="button" disabled aria-label="Samsung down"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg></button>
+    </div>
+    <button class="secondary-button" data-samsung="back" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>Back on Samsung</button>
+    <p id="samsung-last-sent" class="sheet-footnote" aria-live="polite" hidden></p>
+  </dialog>
+
+  <dialog id="type-dialog" class="sheet" aria-labelledby="type-title">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">FIRE TV</p><h2 id="type-title">Type on TV</h2></div><button class="close-button" data-close type="button" aria-label="Close typing"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="type-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <p class="sheet-description">First select a text field on your TV. English letters, numbers and symbols are supported.</p>
+    <form id="text-form"><label for="tv-text">Text to send</label><textarea id="tv-text" placeholder="Search, sign in, or say something…" maxlength="160" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="text-error text-note"></textarea><div class="input-caption"><span id="text-note">Not saved by this remote.</span><span id="text-count">0 / 160</span></div><p id="text-error" class="inline-error" role="alert"></p><button id="text-submit" class="primary-button" type="submit" disabled>Send text<svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button></form>
+    <div class="text-actions"><button class="secondary-button" data-key="delete" type="button" disabled>Delete on TV</button><button class="secondary-button" data-key="enter" type="button" disabled>Enter on TV</button></div>
+  </dialog>
+
+  <dialog id="settings-dialog" class="sheet" aria-labelledby="settings-title">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">NEPAL REMOTE</p><h2 id="settings-title">Your connection</h2></div><button class="close-button" data-close type="button" aria-label="Close settings"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="settings-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <div class="connection-list"><div><span>Mac connection</span><span id="mac-status">Available</span></div><div><span>Fire TV</span><span id="fire-status">Pair remote</span></div><div id="samsung-status-row" hidden><span>Samsung</span><span id="samsung-status">Not paired</span></div></div>
+    <p id="connection-help" class="sheet-description">Keep this Mac awake and your phone on the same Wi-Fi.</p>
+    <button id="settings-reconnect" class="primary-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Reconnect Fire TV</button>
+    <button id="pairing-button" class="secondary-button" type="button">Pair this remote</button>
+    <section id="samsung-setup" class="settings-section" hidden><h3>Samsung TV</h3><p id="samsung-message" class="sheet-description" aria-live="polite">Connect once and select Allow on your Samsung.</p><button id="samsung-pair" class="secondary-button" type="button" disabled>Connect Samsung</button></section>
+    <div class="text-actions settings-power"><button class="secondary-button" data-key="wake" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-power"/></svg>Wake Fire TV</button><button class="secondary-button" data-key="sleep" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-sleep"/></svg>Sleep Fire TV</button></div>
+    <details class="keyboard-help"><summary>Keyboard shortcuts</summary><p>Arrow keys navigate · Enter selects · Escape goes back<br>H Home · M Menu · Space play / pause</p></details>
+    <p class="sheet-footnote">Private controls on your home network. Keep this Mac awake while using the remote.</p>
+  </dialog>
+
+  <dialog id="pair-dialog" class="sheet pair-dialog" aria-labelledby="pair-title" aria-describedby="pair-description">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">NEPAL REMOTE</p><h2 id="pair-title">Pair your remote</h2></div><button id="pair-close" class="close-button" data-close type="button" aria-label="Close pairing"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="pair-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <p id="pair-description" class="sheet-description">Enter the 6-digit code shown on your Mac.</p>
+    <form id="pair-form"><label for="pair-pin">Pairing code</label><input id="pair-pin" name="pin" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required aria-describedby="pair-error"><p id="pair-error" class="inline-error" role="alert"></p><button id="pair-submit" class="primary-button" type="submit">Connect remote<svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button></form>
+    <p class="sheet-footnote">No account needed. You can close this and look around first.</p>
   </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>

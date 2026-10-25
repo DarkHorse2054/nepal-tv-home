@@ -1,0 +1,1 @@
+{"name":"Nepal Remote","short_name":"Nepal Remote","description":"Your Nepal Home remote on your home network.","start_url":"/","scope":"/","display":"standalone","background_color":"#131918","theme_color":"#131918","icons":[{"src":"/assets/remote-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}

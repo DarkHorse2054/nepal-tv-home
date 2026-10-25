@@ -15,6 +15,7 @@ import mimetypes
 from pathlib import Path
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import subprocess
@@ -36,7 +37,8 @@ CONFIG = load_local_config()
 
 KEYS = {"up": 19, "down": 20, "left": 21, "right": 22, "ok": 23,
         "home": 3, "back": 4, "menu": 82, "play_pause": 85,
-        "rewind": 89, "fast_forward": 90, "wake": 224, "sleep": 223}
+        "rewind": 89, "fast_forward": 90, "wake": 224, "sleep": 223,
+        "enter": 66, "delete": 67}
 # Exact components from the launcher's saved on-device app order.
 APPS = {
     "netflix": "com.netflix.ninja/.MainActivity",
@@ -44,12 +46,16 @@ APPS = {
     "disney": "com.disney.disneyplus/com.bamtechmedia.dominguez.main.MainActivity",
     "paramount": "com.cbs.ott/com.paramount.android.pplus.features.splash.tv.SplashMediatorActivity",
     "hulu": "com.hulu.plus/.SplashActivity",
+    "npl": "app.nepal.npltv/.MainActivity",
 }
+TEXT_MAX_LENGTH = 160
+TEXT_MAX_SEGMENTS = 4
 MONTHS = ("Baisakh", "Jestha", "Ashadh", "Shrawan", "Bhadra", "Ashwin",
           "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
        "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
-       "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'")
+       "manifest-src 'self'; base-uri 'none'; form-action 'self'; "
+       "frame-ancestors 'none'; object-src 'none'")
 
 
 def unique_json_object(pairs):
@@ -59,6 +65,31 @@ def unique_json_object(pairs):
             raise ValueError("Duplicate JSON member")
         result[key] = value
     return result
+
+
+def validate_text(value):
+    """Fire OS input supports printable ASCII; reject unsupported input before I/O."""
+    if not isinstance(value, str) or not 1 <= len(value) <= TEXT_MAX_LENGTH:
+        raise ApiError(400, "invalid_text_length")
+    if any(not 32 <= ord(character) <= 126 for character in value):
+        raise ApiError(400, "unsupported_text_character")
+    # Each literal %s needs a separate input process; keep work within the
+    # existing command deadline instead of allowing a long remote shell chain.
+    if value.count("%s") + 1 > TEXT_MAX_SEGMENTS:
+        raise ApiError(400, "split_text_required")
+    return value
+
+
+def text_command(value):
+    """Quote for Android's remote POSIX shell, independently of the local argv.
+
+    Android's input tool translates the literal pair %s into a space. Splitting
+    only that boundary preserves both literal %s and ordinary spaces. Every
+    variable part is shell-quoted; only fixed input-text clauses are executable.
+    """
+    value = validate_text(value)
+    return " && ".join("input text " + shlex.quote(part)
+                       for part in re.split(r"(?<=%)(?=s)", value))
 
 
 class ApiError(Exception):
@@ -136,7 +167,7 @@ class Pairing:
 
 
 class AdbBridge:
-    """Fixed argument vectors only. No shell, arbitrary text, or package endpoints."""
+    """One configured TV, allowlisted actions, and bounded, remote-shell-quoted text."""
     def __init__(self, adb, fire_tv, runner=subprocess.run, clock=time.monotonic):
         self.target = CONFIG.validate_fire_tv(fire_tv)
         self.serial = self.target["host"] + ":5555"
@@ -193,6 +224,8 @@ class AdbBridge:
             args = ["shell", "input", "keyevent", str(KEYS[value])]
         elif kind == "app" and value in APPS:
             args = ["shell", "am", "start", "-n", APPS[value]]
+        elif kind == "text":
+            args = ["shell", text_command(value)]
         else:
             raise ApiError(400, "invalid_control")
         if not self.control_rate.allow("all"):
@@ -205,9 +238,31 @@ class AdbBridge:
                 # Worst case here is 1s state + 1s model + 4s command.
                 if not self._probe(reconnect=False):
                     raise ApiError(503, "tv_unavailable")
-            status, output = self._run(["-s", self.serial, *args], timeout=4)
+            try:
+                status, output = self._run(["-s", self.serial, *args], timeout=4)
+            except ApiError:
+                if kind == "text":
+                    # A lost acknowledgement can follow a partial/full send.
+                    # Never replay text or expose it in the error response.
+                    raise ApiError(503, "text_send_uncertain") from None
+                raise
             if status or re.search(r"(?:^|\n)(?:Error:|Exception|SecurityException|java\.)", output):
-                raise ApiError(503, "command_failed")
+                raise ApiError(503, "text_send_uncertain" if kind == "text" else "command_failed")
+        finally:
+            self.command_lock.release()
+
+    def reconnect(self):
+        """A fresh, serialized identity check; inputs are never queued or replayed."""
+        if not self.control_rate.allow("all"):
+            raise ApiError(429, "control_rate_limited")
+        if not self.command_lock.acquire(blocking=False):
+            raise ApiError(429, "control_busy")
+        try:
+            try:
+                return self._probe()
+            except ApiError:
+                self.last_probe = self.clock()
+                return False
         finally:
             self.command_lock.release()
 
@@ -448,11 +503,13 @@ class RemoteApp:
         target = (self.dist / ("index.html" if path == "/" else path.lstrip("/"))).resolve()
         if not target.is_relative_to(self.dist) or not target.is_file():
             raise ApiError(404, "not_found")
-        if target.suffix.lower() not in {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".woff2", ".ttf", ".ico"}:
+        if target.suffix.lower() not in {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".woff2", ".ttf", ".ico", ".webmanifest"}:
             raise ApiError(404, "not_found")
         if target.stat().st_size > 8 * 1024 * 1024:
             raise ApiError(413, "asset_too_large")
         mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        if target.suffix.lower() == ".webmanifest":
+            mime = "application/manifest+json; charset=utf-8"
         if target.suffix in (".js", ".css", ".html", ".svg"):
             mime += "; charset=utf-8"
         return target.read_bytes(), mime
@@ -522,7 +579,7 @@ class Handler(BaseHTTPRequestHandler):
                     body, mime = app.static(parsed.path)
                     self.respond(200, body, mime, head=method == "HEAD")
                 return
-            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", *SAMSUNG_PATHS):
+            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", "/api/text", "/api/reconnect", *SAMSUNG_PATHS):
                 raise ApiError(405, "method_not_allowed")
             if parsed.path != "/api/pair":
                 app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
@@ -535,6 +592,11 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json_object)
             except (ValueError, UnicodeError):
                 raise ApiError(400, "invalid_json")
+            if parsed.path == "/api/reconnect":
+                if not isinstance(payload, dict) or payload:
+                    raise ApiError(400, "invalid_payload")
+                self.respond(200, {"ok": True, "online": app.bridge.reconnect()})
+                return
             if parsed.path == "/api/samsung/pair":
                 if not isinstance(payload, dict) or payload:
                     raise ApiError(400, "invalid_payload")
@@ -547,11 +609,16 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError(400, "invalid_samsung_key")
                 self.respond(200, app.samsung.key(payload["key"]))
                 return
-            field = {"/api/pair": "pin", "/api/key": "key", "/api/app": "app"}[parsed.path]
+            field = {"/api/pair": "pin", "/api/key": "key", "/api/app": "app", "/api/text": "text"}[parsed.path]
             if not isinstance(payload, dict) or set(payload) != {field} or not isinstance(payload[field], str):
                 raise ApiError(400, "invalid_payload")
             if field == "pin":
                 self.respond(200, app.pairing.pair(payload[field], self.client_address[0]))
+                return
+            if field == "text":
+                validate_text(payload[field])
+                app.bridge.command(field, payload[field])
+                self.respond(200, {"ok": True})
                 return
             choices = KEYS if field == "key" else APPS
             if payload[field] not in choices:

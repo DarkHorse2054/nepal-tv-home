@@ -1,22 +1,30 @@
 # Samsung panel controls and observed HDMI testing
 
-This change prepares Route A from the independent feedback: fixed discrete HDMI keys through the existing authorized local Samsung connection. It also adds volume up/down, mute and explicit power off. All new hardware behavior is **untested on the owner's TV** until observed. The previously confirmed result remains opening Samsung's native Source menu.
+The companion includes volume up/down, mute, explicit power off and Samsung Source-menu navigation. Fixed discrete HDMI keys remain available only through the helper/API for observed testing. They are not established as working on the recorded TU7000 firmware. Opening Samsung’s native Source menu was previously confirmed; a successful transport write alone does not verify other panel behavior.
 
 ## What is implemented
 
 - Fixed action aliases only: `hdmi1`-`hdmi4` map to `KEY_HDMI1`-`KEY_HDMI4`; `volume_up`, `volume_down`, `mute` and `power_off` map to `KEY_VOLUP`, `KEY_VOLDOWN`, `KEY_MUTE` and `KEY_POWEROFF`.
 - Existing source/navigation, explicit on-TV pairing, exact-model gate, fixed target ports, private token file, webpage bearer/Origin checks, timeouts and independent Samsung/Fire TV locks remain in place.
-- Samsung controls above Fire TV controls; source navigation and experimental HDMI tests are folded away by default. Samsung keyboard navigation can work while Fire TV is offline.
+- Samsung controls sit above Fire TV navigation. Sources opens a navigation sheet; experimental HDMI keys are deliberately absent from the normal UI. Samsung keyboard navigation can work while Fire TV is offline.
 - `Last sent` records only a successful WebSocket write, with its timestamp, in server memory. Failed sends do not overwrite the previous entry. It does not mean the television selected or accepted an input.
 - Optional private config labels, such as `"source_labels":{"hdmi1":"Fire TV","hdmi2":"Console"}`. Labels are displayed with textContent and cannot change key codes, device identity or authorization filenames.
 
 ## Route A: test with someone watching the panel
 
-1. Turn the Samsung on using its physical remote. Keep that remote nearby and identify which actual input returns to Fire TV. Use only physical inputs present on this TV; HDMI 3/4 buttons are generic protocol tests, not a claim that this model has four sockets.
-2. Start the configured companion, open its webpage, pair the webpage and connect Samsung if needed. Go to Sources > Experimental HDMI tests.
-3. With the physical remote, select a *different known input* from the target. Click just the target test button once. Wait several seconds and watch the panel.
+1. Turn the Samsung on using its physical remote. Keep that remote nearby and identify which actual input returns to Fire TV. Use only physical inputs present on this TV; HDMI 3/4 actions are generic protocol tests, not a claim that this model has four sockets.
+2. Start the configured companion, open its webpage, pair the webpage and connect Samsung if needed. For an experimental HDMI trial, use the fixed command-line helper shown below; normal Sources navigation stays in the webpage.
+3. With the physical remote, select a *different known input* from the target. Send just the target helper command once, using only an actual port on your TV. Wait several seconds and watch the panel.
 4. Record the starting input, target, timestamp and visible result as switched / ignored / uncertain / not applicable. The webpage's Last sent line is transport evidence only. An empty input may show its input name or No Signal; lack of a picture alone is not proof the command failed.
 5. Return to the original Fire TV input with the physical remote. Repeat from each other actual source, three times per direction. For two inputs this is six transitions; include TV or other sources only if actually available and relevant.
+Use the configured companion’s Python environment and your private configuration. For example, to test HDMI 1 once:
+
+```sh
+python3 -B remote/samsung.py --config remote/state/config.json nav hdmi1
+```
+
+Repeat the procedure with `hdmi2` only if applicable. The helper accepts fixed aliases, not arbitrary key codes.
+
 6. Test volume down once, volume up once and mute/unmute while observing the Samsung OSD/audio. Test Power off last, because this version has no power-on or Wake-on-LAN action. Record actual outcomes separately from HDMI behavior.
 
 | Trial | Starting input | Target | Last sent time | Observed result | Notes / return path |
@@ -33,7 +41,7 @@ Route C (UPnP) remains investigation only. This project has not established supp
 
 ## Boundaries and next work
 
-This stage does not alter the Fire TV launcher, native Home selection, installed apps, privacy settings, firmware, Samsung pairing approval or trust settings. Native Android Sources, Wake-on-LAN, Source-menu macros, monitoring, text entry and other suggested features are not implemented here.
+This stage does not alter the Fire TV launcher, native Home selection, installed apps, privacy settings, firmware, Samsung pairing approval or trust settings. Native Android Sources is a separate launcher feature. The webpage includes bounded text entry and connection recovery; see [remote setup and behavior](README.md). Wake-on-LAN, Source-menu macros and monitoring are not implemented.
 
 The existing Python companion uses a connection-local context for Samsung's self-signed TLS service, without certificate pinning. Host/model checks and private tokens do not substitute for certificate authentication. This change does not claim to fix that pre-existing limitation. A future native or companion pinning implementation needs an explicit first-pair trust model, mismatch behavior and token-migration tests; it must not globally disable Android certificate validation.
 

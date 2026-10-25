@@ -43,3 +43,5 @@ Version 17 / 4.4.1-compact-brand-icons includes two unmodified PNGs from the bra
 | `youtube_official_play.png` (1255 × 1075) | [YouTube icon guide](https://brand.youtube/youtube-icon/); [youtube-icon.zip](https://www.gstatic.com/marketing-cms/78/29/3e68a1414bb28d0b7e47b44c3c91/youtube-icon.zip), member `YouTube_Icon/Digital/01 Red/yt_icon_red_digital.png` | `1027b1b0517727adb9697155a270744381c3ce9b047b1c8bd8a9389dc7d07a83` |
 
 The stored PNG bytes match the archive originals. Display scaling preserves their proportions, colors and transparency. See [the compact-icon note](launcher/BRAND-ICONS.md) for their use alongside native installed-app icons.
+
+The phone remote reuses these same unmodified PNGs at `remote/dist/assets/netflix.png` and `youtube.png`; the same copyright, trademark and license exclusions apply. The remote's mountain/control icon is original SVG artwork.
