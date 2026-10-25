@@ -494,6 +494,7 @@
       }
     }
   }
+  $('#airplay-button').addEventListener('click', () => openSheet($('#airplay-dialog')));
   $('#device-button').addEventListener('click', () => {
     stopDevicePolling();
     deviceSample = null;

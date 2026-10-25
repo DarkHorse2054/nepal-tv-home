@@ -116,6 +116,10 @@ Home sends native Android key code 3. This remote does not change the default la
 
 Date status includes `localDate`, `localTime`, `localLabel`, `secondaryDate`, `secondaryTime` and `secondaryLabel`. The historical `sanMateo`, `nepal` and `kathmanduTime` fields remain aliases for existing frontend compatibility; they use your configured zones. The bundled BS calendar ends at BS 2083 and falls back to Gregorian beyond its table. Its license is retained in `data/NEPALI-CALENDAR-LICENSE.txt`.
 
+## Native television AirPlay
+
+**Tools → AirPlay** opens connection help, including before remote pairing or while the Fire TV connection is offline. Put your Apple device and compatible Samsung TV on the same Wi-Fi, then use **Control Center → Screen Mirroring** and choose the Samsung receiver. Enter the TV's code if requested. The guide sends no device command and does not enable a receiver on the Fire TV. Native AirPlay streams directly to Samsung, so the companion computer does not need to remain awake for casting. The remote webpage itself still requires its server to load.
+
 ## Device information, weather and wallpaper
 
 **Device** reads Fire TV RAM and the internal `/data` partition on demand. The phone polls every ten seconds only while that sheet is open and visible; the server shares a ten-second cache across paired clients. Each sample verifies the fixed TV identity, takes the existing ADB lock without waiting behind controls, and uses only `cat /proc/meminfo` and `df -k /data`, with one-second command deadlines. It never reconnects a device automatically. RAM usage is total minus `MemAvailable`, which includes reclaimable cache; it is not a per-app reading. Storage describes the usable data partition, not the advertised flash capacity. Missing or unsupported readings remain unavailable rather than showing zero. An interrupted refresh keeps the last successful sample, its age and a stale flag.

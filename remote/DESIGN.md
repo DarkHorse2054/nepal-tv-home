@@ -23,3 +23,5 @@ Review 320/375/390px phones, landscape, desktop, pairing, typing, Sources and of
 ## Device, weather and wallpaper tools
 
 A compact Tools row opens native browser dialogs without enlarging the curated six-app dock. Device shows actual Fire TV RAM/storage totals and samples every ten seconds only while visible; unavailable values remain missing and stale samples are labeled. Weather presents current conditions, the configured local day and seven forecast rows, including provider attribution and cache age. Older dates are never relabeled Today. Wallpaper is a four-choice explicit Apply action, with no current-state readback claim. Open ESPN remains in Settings so the dock stays compact. Native Home provides equivalent tools through one four-square utility icon.
+
+AirPlay is a fourth Tools entry with an original stroke icon and a local guide sheet. The row uses four vertical icon/label targets at widths of 360px and above, and a two-by-two grid below 360px. The guide remains available unpaired and offline, issues no API request and makes no live connection claim. It explains native Samsung casting separately from the Mac-hosted remote.

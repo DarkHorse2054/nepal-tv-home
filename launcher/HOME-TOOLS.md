@@ -2,6 +2,8 @@
 
 Version 20 / `4.6.0-home-tools` adds one four-square Tools icon to the left of Sources. Weather, Device and Wallpaper open from that menu using the Fire TV D-pad. Back returns to Tools; Back again returns Home. The existing English clock, small Nepal date, scene treatment and compact dock remain in place.
 
+Version 21 / `4.6.1-airplay-guide` adds **AirPlay** connection help. It uses a compatible television's existing receiver; see [AirPlay setup](AIRPLAY.md). Returning from a tool restores focus to its menu row.
+
 ## Device
 
 RAM uses Android's system-wide `ActivityManager.MemoryInfo`: used memory is total minus available, including memory the system can reclaim. Storage uses `StatFs` on the Fire TV's `/data` partition. Both show used / total, percent used and available space in GiB. They describe the Fire TV stick, not the Samsung display or the Mac.

@@ -2,7 +2,7 @@
 
 A calm, dark home screen for Fire TV with Himalayan scenes, an English clock, a small Nepali date and a compact glass dock. Adapted from [Gathin23/tv-vibehack](https://github.com/Gathin23/tv-vibehack).
 
-**v20 / 4.6.0-home-tools - source preview**
+**v21 / 4.6.1-airplay-guide - source preview**
 
 ![Nepal TV Home on the tested Fire TV](docs/images/home.png)
 
@@ -16,6 +16,7 @@ A calm, dark home screen for Fire TV with Himalayan scenes, an English clock, a 
 - Local appearance settings, favorite-app controls and an included clock screensaver.
 - **Sources on the TV:** pair a compatible Samsung once, then use the Fire remote to choose from Samsung's input picker. No computer needed.
 - On-TV Tools for live Fire TV RAM/storage, current weather and a seven-day forecast, and wallpaper choices.
+- AirPlay connection help in TV Home and the phone remote, using a compatible television's built-in receiver.
 - An optional phone/web remote with the same tools, a glass D-pad, app dock, Type on TV, Samsung controls and connection recovery.
 - An ESPN launch shortcut in remote Settings; install the official app separately.
 
@@ -23,11 +24,11 @@ Netflix, YouTube, Disney+, Paramount+ and Hulu are the default favorites. Instal
 
 ## Phone remote
 
-The redesigned companion uses a warm Himalayan theme, a floating app dock and matching sheets for typing, Samsung Sources and pairing. Device readings refresh every ten seconds while open. Weather shows current conditions, daily highs/lows and a seven-day forecast. Wallpaper applies Automatic, Morning, Dusk or Night through the v19+ launcher’s protected fixed command. It supports keyboard controls, visible focus, reduced motion and narrow phone layouts. Notifications appear inside the active sheet so confirmations and errors stay visible.
+The redesigned companion uses a warm Himalayan theme, a floating app dock and matching sheets for typing, Samsung Sources and pairing. Device readings refresh every ten seconds while open. Weather shows current conditions, daily highs/lows and a seven-day forecast. Wallpaper applies Automatic, Morning, Dusk or Night through the v19+ launcher’s protected fixed command. AirPlay opens local connection instructions, available before pairing and while the TV connection is offline. It supports keyboard controls, visible focus, reduced motion and narrow phone layouts. Notifications appear inside the active sheet so confirmations and errors stay visible.
 
 <img src="docs/images/remote.png" alt="Nepal Remote with Samsung controls, a sculpted directional pad and a compact app dock" width="360">
 
-*Remote interface. The computer must stay awake while using the phone remote; on-TV Tools run directly on the Fire TV.*
+*Remote interface. The computer must stay awake while using the phone remote; on-TV Tools run directly on the Fire TV. Native AirPlay streams directly to a compatible television and does not require the companion computer.*
 
 Follow [remote setup](remote/README.md) to configure your own devices and start the local server. NPL TV is an optional sixth dock shortcut. ESPN opens from remote Settings or the launcher’s app drawer after installation. These apps and their subscriptions are not included.
 
@@ -44,6 +45,7 @@ Clock locations currently default to San Mateo and Kathmandu in source. On-TV we
 ## Project notes
 
 - [On-TV Device, Weather and Wallpaper tools](launcher/HOME-TOOLS.md)
+- [Native television AirPlay setup and verification](launcher/AIRPLAY.md)
 - [Protected remote wallpaper command](launcher/REMOTE-WALLPAPER.md)
 - [Samsung Sources and pairing](launcher/NATIVE-SOURCES.md)
 - [Glass rendering and verification](launcher/GLASS-DOCK.md)

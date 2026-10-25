@@ -10,8 +10,8 @@ android {
         applicationId 'com.gathin.tvhome'
         minSdk 25
         targetSdk 29
-        versionCode 20
-        versionName '4.6.0-home-tools'
+        versionCode 21
+        versionName '4.6.1-airplay-guide'
     }
 
     buildTypes {

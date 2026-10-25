@@ -28,7 +28,7 @@ import okhttp3.Call;
 
 /** Small on-demand utilities; Home stays a clock, a scene and the curated dock. */
 final class HomeToolsDialog extends Dialog {
-    private enum Page { MENU, DEVICE, WEATHER, WALLPAPER }
+    private enum Page { MENU, DEVICE, WEATHER, WALLPAPER, AIRPLAY }
     private final Activity activity;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private LinearLayout panel;
@@ -98,11 +98,29 @@ final class HomeToolsDialog extends Dialog {
     }
 
     private void showMenu() {
+        Page previous = page;
         begin(Page.MENU, "Tools");
-        TextView first = action("Weather", () -> showWeather(true));
-        action("Device", this::showDevice);
-        action("Wallpaper", this::showWallpaper);
-        first.requestFocus();
+        TextView weather = action("Weather", () -> showWeather(true));
+        TextView device = action("Device", this::showDevice);
+        TextView wallpaper = action("Wallpaper", this::showWallpaper);
+        TextView airplay = action("AirPlay", this::showAirPlay);
+        if (previous == Page.AIRPLAY) airplay.requestFocus();
+        else if (previous == Page.DEVICE) device.requestFocus();
+        else if (previous == Page.WALLPAPER) wallpaper.requestFocus();
+        else weather.requestFocus();
+    }
+
+    private void showAirPlay() {
+        begin(Page.AIRPLAY, "AirPlay");
+        text("Use the same Wi-Fi as your TV.", 15, 0xFFBAC8D8, 14);
+        text("iPhone / iPad", 14, 0xFFBAC8D8, 19);
+        text("Control Center → Screen Mirroring", 16, 0xFFF3F5F9, 5);
+        text("Mac", 14, 0xFFBAC8D8, 16);
+        text("Control Center → Screen Mirroring", 16, 0xFFF3F5F9, 5);
+        text("Choose your TV and enter its on-screen code.", 16, 0xFFF3F5F9, 19);
+        footer("On Samsung, choose the Samsung TV, not Fire TV.");
+        footer("Requires a TV with built-in AirPlay turned on. It receives directly; no Mac relay needed.");
+        action("Back", this::showMenu).requestFocus();
     }
 
     private void showWallpaper() {

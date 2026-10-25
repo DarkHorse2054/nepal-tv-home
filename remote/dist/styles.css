@@ -396,3 +396,15 @@ h1 { margin: 0; font-size: 27px; font-weight: 450; letter-spacing: -.8px; line-h
 @media (max-width: 359px) { .tool-button { flex-direction: column; gap: 5px; min-height: 66px; } .forecast-row { grid-template-columns: 36px minmax(0, 1fr) 34px 58px; gap: 5px; } }
 
 .forecast-heading { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; color: var(--quiet); font-size: 12px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+
+/* AirPlay uses Samsung's native receiver; this local guide needs no pairing. */
+.tools-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tool-button { flex-direction: column; gap: 5px; min-height: 68px; }
+.airplay-steps { margin: 0 0 22px; padding-left: 24px; color: var(--muted); font-size: 14px; line-height: 1.65; }
+.airplay-steps li { padding-left: 5px; margin: 0 0 14px; }
+.airplay-steps li::marker { color: var(--gold); font-weight: 500; }
+.airplay-steps strong, .airplay-help strong { color: var(--ink); font-weight: 500; }
+.airplay-help { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--glass); }
+.airplay-help h3 { font-size: 14px; font-weight: 500; margin: 0 0 7px; }
+.airplay-help p { font-size: 13px; line-height: 1.65; margin: 0; color: var(--muted); }
+@media (max-width: 359px) { .tools-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

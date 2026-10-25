@@ -206,7 +206,7 @@ function harness(fixtures = {}) {
     return Promise.resolve(response(defaults[url] || { ok: true, state: 'sent' }));
   };
   window.matchMedia = () => ({ matches: false });
-  const session = new Map([['nepal.remote.session', 'unit-test-token']]);
+  const session = new Map(fixtures.paired === false ? [] : [['nepal.remote.session', 'unit-test-token']]);
   const context = vm.createContext({
     document, window, HTMLElement: Element, HTMLButtonElement: Button, fetch,
     sessionStorage: { getItem: key => session.get(key), setItem: (key, value) => session.set(key, value), removeItem: key => session.delete(key) },
@@ -638,4 +638,40 @@ test('Open ESPN launches the installed app explicitly and disables while Fire TV
   assert.equal(ui.calls('/api/app').length, 1);
   const dockApps = ui.document.querySelectorAll('[data-app]').filter(button => button.closest('.app-dock')).map(button => button.dataset.app);
   assert.deepEqual(dockApps, ['netflix', 'youtube', 'disney', 'paramount', 'hulu', 'npl']);
+});
+
+
+test('AirPlay help opens unpaired without API calls and closes with native Escape', async () => {
+  const ui = harness({ paired: false }); await flush();
+  assert.equal(ui.requests.length, 0);
+  assert.equal(ui.get('#airplay-button').disabled, false);
+  assert.equal(ui.get('#device-button').disabled, true);
+  ui.click('#airplay-button');
+  assert.equal(ui.get('#airplay-dialog').open, true);
+  assert.match(ui.get('#airplay-dialog').textContent, /Screen Mirroring/);
+  assert.match(ui.get('#airplay-dialog').textContent, /directly to Samsung/);
+  assert.match(ui.get('#airplay-dialog').textContent, /does not need to stay awake/);
+  assert.equal(ui.requests.length, 0);
+  const event = ui.key('Escape', ui.get('#airplay-dialog'));
+  assert.equal(event.defaultPrevented, false);
+  await flush(); assert.equal(ui.get('#airplay-dialog').open, false);
+  assert.equal(ui.requests.length, 0);
+});
+
+test('AirPlay help remains available offline and opening it tears down device polling', async () => {
+  const ui = harness(); await flush();
+  ui.click('#device-button'); await flush();
+  assert.equal(ui.calls('/api/device').length, 1);
+  ui.window.dispatch('offline');
+  assert.equal(ui.get('#device-button').disabled, true);
+  assert.equal(ui.get('#airplay-button').disabled, false);
+  const before = ui.requests.length;
+  ui.click('#airplay-button'); await flush();
+  assert.equal(ui.get('#airplay-dialog').open, true);
+  assert.equal(ui.get('#device-dialog').open, false);
+  assert.equal(ui.requests.length, before, 'Opening the local guide sends no command or API request');
+  await ui.clock.advance(30000);
+  assert.equal(ui.calls('/api/device').length, 1, 'AirPlay help does not keep device polling alive');
+  assert.equal(ui.calls('/api/key').length, 0);
+  assert.equal(ui.calls('/api/samsung/key').length, 0);
 });
