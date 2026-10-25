@@ -41,7 +41,7 @@ Route C (UPnP) remains investigation only. This project has not established supp
 
 ## Boundaries and next work
 
-This stage does not alter the Fire TV launcher, native Home selection, installed apps, privacy settings, firmware, Samsung pairing approval or trust settings. Native Android Sources is a separate launcher feature. The webpage includes bounded text entry and connection recovery; see [remote setup and behavior](README.md). Wake-on-LAN, Source-menu macros and monitoring are not implemented.
+This stage does not alter the Fire TV launcher, native Home selection, installed apps, privacy settings, firmware, Samsung pairing approval or trust settings. Native Android Sources is a separate launcher feature. The webpage includes bounded text entry and connection recovery; see [remote setup and behavior](README.md). Wake-on-LAN, Source-menu macros and a scheduled health watchdog are not implemented. Device RAM/storage readings and weather are available separately through the remote’s Tools panels.
 
 The existing Python companion uses a connection-local context for Samsung's self-signed TLS service, without certificate pinning. Host/model checks and private tokens do not substitute for certificate authentication. This change does not claim to fix that pre-existing limitation. A future native or companion pinning implementation needs an explicit first-pair trust model, mismatch behavior and token-migration tests; it must not globally disable Android certificate validation.
 

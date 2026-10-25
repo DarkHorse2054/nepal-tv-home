@@ -19,3 +19,7 @@ Preserve fixed action allowlists, session authorization, command serialization a
 ## Verification
 
 Review 320/375/390px phones, landscape, desktop, pairing, typing, Sources and offline recovery. No horizontal overflow or touch targets below 44px were found at the checked sizes. Narrow/short screens may scroll vertically. Native mobile software keyboards and OS text scaling still need real-phone checks. Existing regression tests cover tap/hold cancellation, typing races, dialog dismissal and connection recovery, plus dialog-local notifications. A screenshot fixture simulates devices; it must never be presented as proof of a real TV input or playback state.
+
+## Device, weather and wallpaper tools
+
+A compact Tools row opens native browser dialogs without enlarging the curated six-app dock. Device shows actual Fire TV RAM/storage totals and samples every ten seconds only while visible; unavailable values remain missing and stale samples are labeled. Weather presents current conditions, the configured local day and seven forecast rows, including provider attribution and cache age. Older dates are never relabeled Today. Wallpaper is a four-choice explicit Apply action, with no current-state readback claim. Open ESPN remains in Settings so the dock stays compact. Native Home provides equivalent tools through one four-square utility icon.

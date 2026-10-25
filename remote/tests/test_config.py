@@ -17,6 +17,25 @@ config = server.CONFIG
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_optional_weather_is_backwards_compatible_and_has_no_location_default(self):
+        value = configuration()
+        self.assertNotIn("weather", config.validate(value))
+        value["weather"] = None
+        self.assertIsNone(config.validate(value)["weather"])
+        value["weather"] = {"latitude": 12.3, "longitude": -45.6, "label": " Example city ",
+                            "temperature_unit": "fahrenheit"}
+        self.assertEqual(config.validate(value)["weather"]["label"], "Example city")
+        for field, bad in (("latitude", True), ("latitude", -91), ("longitude", 181),
+                           ("longitude", float("nan")), ("label", "x\ny"),
+                           ("temperature_unit", "kelvin")):
+            broken = deepcopy(value)
+            broken["weather"][field] = bad
+            with self.subTest(field=field, bad=bad), self.assertRaises(config.ConfigError):
+                config.validate(broken)
+        value["weather"]["url"] = "https://example.com"
+        with self.assertRaises(config.ConfigError):
+            config.validate(value)
+
     def test_valid_configuration_and_disabled_samsung(self):
         value = configuration()
         result = config.validate(value)

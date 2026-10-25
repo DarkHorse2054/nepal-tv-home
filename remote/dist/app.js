@@ -34,6 +34,9 @@
     samsung_connection_failed: 'Could not reach Samsung. Check that the TV is on.',
     samsung_timeout: 'Samsung took too long to respond.',
     samsung_not_configured: 'Samsung controls have not been set up on your Mac.',
+    feature_rate_limited: 'Give the remote a moment, then refresh.',
+    invalid_wallpaper_mode: 'Choose Auto, Morning, Dusk or Night.',
+    wallpaper_unavailable: 'Wallpaper control is unavailable. Check that Nepal Home is up to date.',
   };
   const keyButtons = [...document.querySelectorAll('[data-key]')];
   const appButtons = [...document.querySelectorAll('[data-app]')];
@@ -123,6 +126,7 @@
       $('#connection-help').textContent = online ? 'Keep this Mac awake and your phone on the same Wi-Fi. Connected means Fire TV is reachable; it does not confirm that the screen is on.' : 'Turn on Fire TV and check its Wi-Fi. If you see an “Allow USB debugging” prompt on the TV, approve this Mac, then reconnect.';
     }
     updateTextButton();
+    renderToolsState();
   }
   function setConnection(isOnline) {
     if (online && !isOnline) invalidateCommands();
@@ -412,6 +416,214 @@
       $('#pair-error').textContent = error.status === 401 || error.status === 403 ? 'That code did not match. Check the code on your Mac.' : error.name === 'AbortError' || !error.status ? 'Cannot reach your Mac. Wake it and check your Wi-Fi.' : error.message;
     } finally { $('#pair-submit').disabled = false; $('#pair-submit').firstChild.textContent = 'Connect remote'; }
   });
+  // Device samples are requested only while their sheet is open and visible.
+  let deviceIntent = 0;
+  let deviceTimer = null;
+  let deviceRequest = null;
+  let deviceSample = null;
+  let weatherIntent = 0;
+  let weatherRequest = null;
+  let weatherSample = null;
+  let wallpaperChoice = 'auto';
+  let wallpaperBusy = false;
+  let wallpaperIntent = 0;
+  const wallpaperModes = ['auto', 'morning', 'dusk', 'night'];
+  const wallpaperButtons = [...document.querySelectorAll('[data-wallpaper]')];
+
+  function featureReady() { return Boolean(token && serverAvailable); }
+  function renderToolsState() {
+    for (const id of ['device-button', 'weather-button', 'wallpaper-button']) $(`#${id}`).disabled = !featureReady();
+    $('#wallpaper-apply').disabled = !featureReady() || !online || wallpaperBusy;
+    for (const button of wallpaperButtons) button.disabled = wallpaperBusy;
+    $('#wallpaper-apply').firstChild.textContent = wallpaperBusy ? 'Applying…' : 'Apply wallpaper';
+  }
+  function formatBytes(value) {
+    if (!Number.isFinite(value) || value < 0) return '—';
+    const unit = value >= 1024 ** 3 ? 1024 ** 3 : 1024 ** 2;
+    return `${(value / unit).toLocaleString([], { maximumFractionDigits: 1 })} ${unit === 1024 ** 3 ? 'GiB' : 'MiB'}`;
+  }
+  function ageLabel(age) {
+    if (!Number.isFinite(age) || age < 0) return 'Update time unavailable';
+    if (age < 60) return 'Updated just now';
+    if (age < 3600) return `Updated ${Math.floor(age / 60)} min ago`;
+    if (age < 86400) return `Updated ${Math.floor(age / 3600)} hr ago`;
+    return `Updated ${Math.floor(age / 86400)} days ago`;
+  }
+  function renderMetric(name, metric) {
+    const valid = metric && ['totalBytes', 'availableBytes', 'usedBytes', 'usedPercent'].every(key => Number.isFinite(metric[key])) && metric.totalBytes > 0 && metric.usedPercent >= 0 && metric.usedPercent <= 100;
+    $(`#${name}-percent`).textContent = valid ? `${Math.round(metric.usedPercent)}% used` : 'Unavailable';
+    $(`#${name}-used`).textContent = valid ? `${formatBytes(metric.usedBytes)} / ${formatBytes(metric.totalBytes)}` : '—';
+    $(`#${name}-available`).textContent = valid ? `${formatBytes(metric.availableBytes)} available` : 'No sample available';
+    $(`#${name}-progress`).hidden = !valid;
+    if (valid) $(`#${name}-progress`).value = metric.usedPercent;
+  }
+  function renderDevice(data, failed = false) {
+    const haveSample = Boolean(data?.sampledAt && (data?.memory || data?.storage));
+    renderMetric('memory', data?.memory);
+    renderMetric('storage', data?.storage);
+    $('#device-state').textContent = failed ? (haveSample ? 'Cannot update · saved snapshot' : 'Device stats are unavailable. Try again.')
+      : !data ? 'Checking Fire TV…' : !data.online ? (haveSample ? 'Fire TV offline · saved snapshot' : 'Fire TV is offline') : !haveSample ? 'Device readings are unavailable' : data.stale ? 'Saved snapshot · update delayed' : 'Live snapshot';
+    $('#device-updated').textContent = haveSample ? `${data.stale || failed || !data.online ? 'Saved sample · ' : ''}${ageLabel(data.ageSeconds)}` : 'No sample yet';
+  }
+  function stopDevicePolling() {
+    deviceIntent++;
+    clearTimeout(deviceTimer);
+    deviceTimer = null;
+    deviceRequest = null;
+    $('#device-refresh').disabled = false;
+  }
+  async function refreshDevice() {
+    if (!token || document.hidden || !$('#device-dialog').open || deviceRequest !== null) return;
+    const intent = deviceIntent;
+    const requestToken = token;
+    deviceRequest = intent;
+    $('#device-refresh').disabled = true;
+    try {
+      const data = await api('/api/device', { timeoutMs: 12000 });
+      if (intent !== deviceIntent || token !== requestToken || document.hidden || !$('#device-dialog').open) return;
+      deviceSample = data;
+      renderDevice(data);
+    } catch (error) {
+      if (intent !== deviceIntent || token !== requestToken || document.hidden || !$('#device-dialog').open) return;
+      if (error.status !== 401) renderDevice(deviceSample, true);
+    } finally {
+      if (intent === deviceIntent) {
+        deviceRequest = null;
+        $('#device-refresh').disabled = false;
+        if ($('#device-dialog').open && !document.hidden && token) deviceTimer = setTimeout(refreshDevice, 10000);
+      }
+    }
+  }
+  $('#device-button').addEventListener('click', () => {
+    stopDevicePolling();
+    deviceSample = null;
+    renderDevice(null);
+    openSheet($('#device-dialog'));
+    refreshDevice();
+  });
+  $('#device-refresh').addEventListener('click', () => { clearTimeout(deviceTimer); deviceTimer = null; refreshDevice(); });
+  $('#device-dialog').addEventListener('close', () => { if (!$('#device-dialog').open) stopDevicePolling(); });
+
+  function weatherDescription(code) {
+    if (code === 0) return 'Clear';
+    if (code === 1) return 'Mostly clear';
+    if (code === 2) return 'Partly cloudy';
+    if (code === 3) return 'Cloudy';
+    if ([45, 48].includes(code)) return 'Fog';
+    if ([51, 53, 55].includes(code)) return 'Drizzle';
+    if ([56, 57].includes(code)) return 'Freezing drizzle';
+    if ([61, 63, 65].includes(code)) return 'Rain';
+    if ([66, 67].includes(code)) return 'Freezing rain';
+    if ([71, 73, 75, 77].includes(code)) return 'Snow';
+    if ([80, 81, 82].includes(code)) return 'Showers';
+    if ([85, 86].includes(code)) return 'Snow showers';
+    if ([95, 96, 99].includes(code)) return 'Thunderstorms';
+    return 'Forecast';
+  }
+  function temperatureLabel(value, unit = '') { return Number.isFinite(value) ? `${Math.round(value)}°${unit}` : '—'; }
+  function rainLabel(value) { return Number.isFinite(value) && value >= 0 && value <= 100 ? `${Math.round(value)}%` : '—'; }
+  function renderWeather(data, failed = false) {
+    const state = data?.state;
+    const enabled = data?.enabled !== false && state !== 'disabled';
+    const daily = Array.isArray(data?.daily) ? data.daily.slice(0, 7) : [];
+    const current = data?.current;
+    const haveForecast = enabled && (current || daily.length > 0);
+    $('#weather-state').textContent = failed ? (haveForecast ? 'Cannot update · saved forecast' : 'Weather is unavailable. Try again.')
+      : !data ? 'Loading forecast…' : !enabled ? 'Weather is not configured on your Mac.'
+      : state === 'unavailable' ? 'Weather is unavailable. Try again.' : state === 'stale' ? 'Saved forecast · update delayed' : 'Current conditions';
+    $('#weather-current').hidden = !haveForecast;
+    $('#weather-daily').hidden = !enabled || daily.length === 0;
+    $('#weather-location').textContent = typeof data?.location === 'string' ? data.location : 'Local weather';
+    const unit = data?.temperatureUnit === 'C' ? 'C' : data?.temperatureUnit === 'F' ? 'F' : '';
+    $('#weather-units').textContent = unit ? `°${unit}` : '';
+    $('#weather-temperature').textContent = temperatureLabel(current?.temperature, unit);
+    $('#weather-condition').textContent = current ? weatherDescription(current.weatherCode) : 'Current conditions unavailable';
+    const localDate = typeof data?.localDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.localDate) ? data.localDate : null;
+    const today = localDate ? daily.find(day => day.date === localDate) : null;
+    const summary = today || daily[0];
+    const summaryDate = typeof summary?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(summary.date) ? new Date(`${summary.date}T12:00:00Z`) : null;
+    $('#weather-summary-label').textContent = today ? 'Today' : summaryDate && Number.isFinite(summaryDate.getTime()) ? `Forecast · ${summaryDate.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: 'UTC' })}` : 'Forecast';
+    $('#weather-today-high').textContent = temperatureLabel(summary?.high);
+    $('#weather-today-low').textContent = temperatureLabel(summary?.low);
+    $('#weather-today-rain').textContent = `Rain ${rainLabel(summary?.precipitationProbability)}`;
+    for (let index = 0; index < 7; index++) {
+      const day = daily[index];
+      $(`#weather-day-${index}`).hidden = !enabled || !day;
+      if (!day) continue;
+      const date = typeof day.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day.date) ? new Date(`${day.date}T12:00:00Z`) : null;
+      $(`#weather-day-${index}-name`).textContent = localDate && day.date === localDate ? 'Today' : date && Number.isFinite(date.getTime()) ? date.toLocaleDateString([], { weekday: 'short', timeZone: 'UTC' }) : `Day ${index + 1}`;
+      $(`#weather-day-${index}-condition`).textContent = weatherDescription(day.weatherCode);
+      $(`#weather-day-${index}-rain`).textContent = rainLabel(day.precipitationProbability);
+      $(`#weather-day-${index}-rain`).setAttribute('aria-label', `Chance of rain ${rainLabel(day.precipitationProbability)}`);
+      $(`#weather-day-${index}-high`).textContent = temperatureLabel(day.high);
+      $(`#weather-day-${index}-low`).textContent = temperatureLabel(day.low);
+    }
+    $('#weather-updated').textContent = data?.sampledAt ? `${state === 'stale' || failed ? 'Saved forecast · ' : ''}${ageLabel(data.ageSeconds)}` : !enabled ? 'Set a weather location in the Mac configuration.' : 'No forecast yet';
+  }
+  async function refreshWeather() {
+    if (!token || document.hidden || !$('#weather-dialog').open || weatherRequest !== null) return;
+    const intent = weatherIntent;
+    const requestToken = token;
+    weatherRequest = intent;
+    $('#weather-refresh').disabled = true;
+    try {
+      const data = await api('/api/weather', { timeoutMs: 12000 });
+      if (intent !== weatherIntent || token !== requestToken || !$('#weather-dialog').open || document.hidden) return;
+      weatherSample = data;
+      renderWeather(data);
+    } catch (error) {
+      if (intent !== weatherIntent || token !== requestToken || !$('#weather-dialog').open || document.hidden) return;
+      if (error.status !== 401) renderWeather(weatherSample, true);
+    } finally {
+      if (intent === weatherIntent) { weatherRequest = null; $('#weather-refresh').disabled = false; }
+    }
+  }
+  $('#weather-button').addEventListener('click', () => {
+    weatherIntent++;
+    weatherRequest = null;
+    weatherSample = null;
+    renderWeather(null);
+    openSheet($('#weather-dialog'));
+    refreshWeather();
+  });
+  $('#weather-refresh').addEventListener('click', refreshWeather);
+  $('#weather-dialog').addEventListener('close', () => { if (!$('#weather-dialog').open) { weatherIntent++; weatherRequest = null; $('#weather-refresh').disabled = false; } });
+
+  function selectWallpaper(mode) {
+    if (!wallpaperModes.includes(mode) || wallpaperBusy) return;
+    wallpaperChoice = mode;
+    for (const button of wallpaperButtons) button.setAttribute('aria-pressed', String(button.dataset.wallpaper === mode));
+    $('#wallpaper-state').textContent = `Choice: ${mode[0].toUpperCase()}${mode.slice(1)}`;
+  }
+  for (const button of wallpaperButtons) button.addEventListener('click', () => selectWallpaper(button.dataset.wallpaper));
+  $('#wallpaper-button').addEventListener('click', () => { wallpaperIntent++; openSheet($('#wallpaper-dialog')); selectWallpaper(wallpaperChoice); renderToolsState(); });
+  $('#wallpaper-dialog').addEventListener('close', () => { if (!$('#wallpaper-dialog').open) wallpaperIntent++; });
+  $('#wallpaper-apply').addEventListener('click', async () => {
+    if (wallpaperBusy || !featureReady() || !online || !wallpaperModes.includes(wallpaperChoice)) return;
+    const intent = wallpaperIntent;
+    const mode = wallpaperChoice;
+    wallpaperBusy = true;
+    renderToolsState();
+    let reported = false;
+    const sent = await queueCommand('/api/wallpaper', { mode }, { onError(error) {
+      reported = true;
+      if (intent !== wallpaperIntent || !$('#wallpaper-dialog').open) return;
+      toast(!error.status ? 'Wallpaper change could not be confirmed. Check Home before trying again.' : error.message);
+    } });
+    wallpaperBusy = false;
+    renderToolsState();
+    if (intent !== wallpaperIntent || !$('#wallpaper-dialog').open) return;
+    if (sent) toast(`${mode[0].toUpperCase()}${mode.slice(1)} applied. Changes appear on Home.`);
+    else if (!reported) toast('Wallpaper was not sent. Reconnect Fire TV and try again.');
+  });
+  document.addEventListener('visibilitychange', () => {
+    stopDevicePolling();
+    if (!document.hidden && $('#device-dialog').open) refreshDevice();
+    if (document.hidden && $('#weather-dialog').open) { weatherIntent++; weatherRequest = null; $('#weather-refresh').disabled = false; }
+    else if (!document.hidden && $('#weather-dialog').open) refreshWeather();
+  });
+  window.addEventListener('pagehide', stopDevicePolling);
+
   const keyboardKeys = {
     ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
     Enter: 'ok', Escape: 'back', Backspace: 'back', ' ': 'play_pause',

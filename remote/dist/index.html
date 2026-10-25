@@ -37,6 +37,9 @@
     <symbol id="i-source" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="3"/><path d="M8 22h8M12 18v4M7 11h10m-3-3 3 3-3 3"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-device" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="4"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M8 2v3m8-3v3M8 19v3m8-3v3M2 8h3m-3 8h3m14-8h3m-3 8h3"/></symbol>
+    <symbol id="i-weather" viewBox="0 0 24 24"><path d="M7 18a4 4 0 1 1 1-7.9A5.5 5.5 0 1 1 18.5 18Z"/><path d="M5 2v2M1 6l2 1m7-5-1 2M4 11a3 3 0 1 1 5-3"/></symbol>
+    <symbol id="i-wallpaper" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="4"/><circle cx="16" cy="9" r="1.5"/><path d="m4 17 5-6 5 6 3-3 3 4"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
   </svg>
 
@@ -94,12 +97,58 @@
         <button class="app-button" data-app="npl" type="button" disabled aria-label="Open NPL TV"><span class="app-icon npl" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m11 8 14 8-14 8Z"/><circle cx="16" cy="16" r="13"/></svg><span>NPL</span></span><span>NPL TV</span></button>
       </div>
     </section>
+    <section class="tools-row" aria-label="TV tools">
+      <button id="device-button" class="tool-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg><span>Device</span></button>
+      <button id="weather-button" class="tool-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-weather"/></svg><span>Weather</span></button>
+      <button id="wallpaper-button" class="tool-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-wallpaper"/></svg><span>Wallpaper</span></button>
+    </section>
     <footer class="page-footer">
       <button id="type-button" class="footer-key" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>Type on TV</button>
       <button id="settings-button" class="footer-key" type="button"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
     </footer>
     <p id="kathmandu-time" class="quiet-time"></p>
   </main>
+
+  <dialog id="device-dialog" class="sheet" aria-labelledby="device-title">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">FIRE TV</p><h2 id="device-title">Device</h2></div><button class="close-button" data-close type="button" aria-label="Close device stats"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="device-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <div class="tool-status-row"><p id="device-state" class="tool-status" aria-live="polite">Checking Fire TV…</p><button id="device-refresh" class="icon-action" type="button" aria-label="Refresh device stats"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg></button></div>
+    <div class="metric-card"><div class="metric-heading"><h3>RAM</h3><span id="memory-percent">—</span></div><p id="memory-used" class="metric-value">—</p><progress id="memory-progress" max="100" value="0" aria-label="RAM used" hidden></progress><p id="memory-available" class="metric-detail">Waiting for a sample</p></div>
+    <div class="metric-card"><div class="metric-heading"><h3>Storage</h3><span id="storage-percent">—</span></div><p id="storage-used" class="metric-value">—</p><progress id="storage-progress" max="100" value="0" aria-label="Storage used" hidden></progress><p id="storage-available" class="metric-detail">Waiting for a sample</p></div>
+    <p id="device-updated" class="tool-updated">No sample yet</p><p class="sheet-footnote">Refreshes every 10 seconds while this sheet is open. Available RAM includes memory Fire TV can reclaim.</p>
+  </dialog>
+
+  <dialog id="weather-dialog" class="sheet" aria-labelledby="weather-title">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">LOCAL FORECAST</p><h2 id="weather-title">Weather</h2></div><button class="close-button" data-close type="button" aria-label="Close weather"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="weather-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <div class="tool-status-row"><p id="weather-state" class="tool-status" aria-live="polite">Loading forecast…</p><button id="weather-refresh" class="icon-action" type="button" aria-label="Refresh weather"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg></button></div>
+    <div id="weather-current" class="weather-current" hidden><div><p id="weather-location" class="weather-location"></p><p id="weather-temperature" class="weather-temperature">—</p><p id="weather-condition" class="weather-condition"></p></div><div class="weather-today"><p id="weather-summary-label">Forecast</p><p><strong id="weather-today-high">—</strong><span id="weather-today-low">—</span></p><p id="weather-today-rain"></p></div></div>
+    <div id="weather-daily" class="forecast-list" aria-label="Seven day forecast" hidden>
+      <div class="forecast-heading"><span>7-day forecast</span><span id="weather-units"></span></div>
+      <div id="weather-day-0" class="forecast-row" hidden><span id="weather-day-0-name" class="forecast-day"></span><span id="weather-day-0-condition" class="forecast-condition"></span><span id="weather-day-0-rain" class="forecast-rain"></span><span class="forecast-range"><strong id="weather-day-0-high"></strong><span id="weather-day-0-low"></span></span></div>
+      <div id="weather-day-1" class="forecast-row" hidden><span id="weather-day-1-name" class="forecast-day"></span><span id="weather-day-1-condition" class="forecast-condition"></span><span id="weather-day-1-rain" class="forecast-rain"></span><span class="forecast-range"><strong id="weather-day-1-high"></strong><span id="weather-day-1-low"></span></span></div>
+      <div id="weather-day-2" class="forecast-row" hidden><span id="weather-day-2-name" class="forecast-day"></span><span id="weather-day-2-condition" class="forecast-condition"></span><span id="weather-day-2-rain" class="forecast-rain"></span><span class="forecast-range"><strong id="weather-day-2-high"></strong><span id="weather-day-2-low"></span></span></div>
+      <div id="weather-day-3" class="forecast-row" hidden><span id="weather-day-3-name" class="forecast-day"></span><span id="weather-day-3-condition" class="forecast-condition"></span><span id="weather-day-3-rain" class="forecast-rain"></span><span class="forecast-range"><strong id="weather-day-3-high"></strong><span id="weather-day-3-low"></span></span></div>
+      <div id="weather-day-4" class="forecast-row" hidden><span id="weather-day-4-name" class="forecast-day"></span><span id="weather-day-4-condition" class="forecast-condition"></span><span id="weather-day-4-rain" class="forecast-rain"></span><span class="forecast-range"><strong id="weather-day-4-high"></strong><span id="weather-day-4-low"></span></span></div>
+      <div id="weather-day-5" class="forecast-row" hidden><span id="weather-day-5-name" class="forecast-day"></span><span id="weather-day-5-condition" class="forecast-condition"></span><span id="weather-day-5-rain" class="forecast-rain"></span><span class="forecast-range"><strong id="weather-day-5-high"></strong><span id="weather-day-5-low"></span></span></div>
+      <div id="weather-day-6" class="forecast-row" hidden><span id="weather-day-6-name" class="forecast-day"></span><span id="weather-day-6-condition" class="forecast-condition"></span><span id="weather-day-6-rain" class="forecast-rain"></span><span class="forecast-range"><strong id="weather-day-6-high"></strong><span id="weather-day-6-low"></span></span></div>
+    </div>
+    <p id="weather-updated" class="tool-updated">No forecast yet</p><p class="sheet-footnote">Forecasts can change. <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Weather by Open-Meteo</a></p>
+  </dialog>
+
+  <dialog id="wallpaper-dialog" class="sheet" aria-labelledby="wallpaper-title">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">NEPAL HOME</p><h2 id="wallpaper-title">Wallpaper</h2></div><button class="close-button" data-close type="button" aria-label="Close wallpaper"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="wallpaper-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <p class="sheet-description">Choose a scene for your TV. Changes appear on Home.</p>
+    <div class="wallpaper-choices" role="group" aria-label="Wallpaper choice">
+      <button class="wallpaper-mode" data-wallpaper="auto" type="button" aria-pressed="true"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Auto</span><span class="wallpaper-hint">Time of day</span></button>
+      <button class="wallpaper-mode" data-wallpaper="morning" type="button" aria-pressed="false"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Morning</span><span class="wallpaper-hint">Soft daylight</span></button>
+      <button class="wallpaper-mode" data-wallpaper="dusk" type="button" aria-pressed="false"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Dusk</span><span class="wallpaper-hint">Evening glow</span></button>
+      <button class="wallpaper-mode" data-wallpaper="night" type="button" aria-pressed="false"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Night</span><span class="wallpaper-hint">After dark</span></button>
+    </div>
+    <p id="wallpaper-state" class="tool-status" aria-live="polite">Choice: Auto</p><button id="wallpaper-apply" class="primary-button" type="button">Apply wallpaper<svg class="icon" aria-hidden="true"><use href="#i-home"/></svg></button>
+    <p class="sheet-footnote">This is your choice for the next action. The remote does not read the TV’s current wallpaper.</p>
+  </dialog>
 
   <dialog id="sources-dialog" class="sheet" aria-labelledby="sources-title">
     <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">SAMSUNG TV</p><h2 id="sources-title">Sources</h2></div><button class="close-button" data-close type="button" aria-label="Close sources"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
@@ -130,6 +179,7 @@
     <button id="pairing-button" class="secondary-button" type="button">Pair this remote</button>
     <section id="samsung-setup" class="settings-section" hidden><h3>Samsung TV</h3><p id="samsung-message" class="sheet-description" aria-live="polite">Connect once and select Allow on your Samsung.</p><button id="samsung-pair" class="secondary-button" type="button" disabled>Connect Samsung</button></section>
     <div class="text-actions settings-power"><button class="secondary-button" data-key="wake" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-power"/></svg>Wake Fire TV</button><button class="secondary-button" data-key="sleep" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-sleep"/></svg>Sleep Fire TV</button></div>
+    <section class="settings-section" aria-label="Other apps"><button id="espn-button" class="secondary-button" data-app="espn" type="button" disabled>Open ESPN</button><p class="sheet-footnote">Apps are installed separately. Sign in and manage subscriptions on your TV.</p></section>
     <details class="keyboard-help"><summary>Keyboard shortcuts</summary><p>Arrow keys navigate · Enter selects · Escape goes back<br>H Home · M Menu · Space play / pause</p></details>
     <p class="sheet-footnote">Private controls on your home network. Keep this Mac awake while using the remote.</p>
   </dialog>

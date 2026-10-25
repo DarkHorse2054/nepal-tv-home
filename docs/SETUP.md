@@ -1,6 +1,6 @@
 # Manual setup
 
-This is a source preview of v18 / 4.4.2-compact-brand-icons. The recorded hardware is a 2018 Fire TV Stick 4K (AFTMM/mantis), Fire OS 6.7.1.1 / Android API 25, connected to a Samsung UN65TU7000BXZA. Other devices and firmware need their own compatibility checks.
+This is a source preview of v20 / 4.6.0-home-tools. The recorded hardware is a 2018 Fire TV Stick 4K (AFTMM/mantis), Fire OS 6.7.1.1 / Android API 25, connected to a Samsung UN65TU7000BXZA. Other devices and firmware need their own compatibility checks.
 
 The launcher can run without the webpage remote. Native Samsung Sources also connects directly from the stick to the display. A computer is needed to build/install the APK, and must stay awake only if you choose to run the optional webpage remote.
 
@@ -90,6 +90,20 @@ Edit that private JSON with your own Fire TV address/model and clock labels/time
 Use your actual `adb` path. Open the printed LAN URL on your phone and enter the newly generated terminal pairing code. Keep the computer awake and server running. Optional Samsung webpage controls need `websockets>=15,<16` in the server's Python environment and their own on-TV approval. See [the remote README](../remote/README.md) for installation and control details.
 
 The remote uses HTTP for a trusted LAN; keep it off public tunnels and router forwarding. Keep runtime configuration, PINs, Samsung tokens, ADB authorization, signing keys and recovery data out of commits and shared archives. Native Sources does not need this server.
+
+## 6. Home Tools and ESPN
+
+Select the four-square **Tools** icon immediately left of Sources. Weather shows San Mateo current conditions and seven days; Device shows live Fire TV RAM/storage; Wallpaper offers the four existing scenes. Native tools work directly on the Fire TV. See [Home Tools](../launcher/HOME-TOOLS.md) for cache, network and location defaults.
+
+The phone remote has matching Device, Weather and Wallpaper sheets. Its weather is optional: configure the `weather` object described in [remote setup](../remote/README.md). Applying wallpaper through the remote requires launcher v19 or later, built with the same signing identity as your installed copy.
+
+Install **ESPN for Fire TV** from Amazon’s official Appstore. Its store page can also be opened using the documented Amazon deep link:
+
+```sh
+adb shell am start -a android.intent.action.VIEW -d 'amzn://apps/android?asin=B00E81O27Y'
+```
+
+Choose Get on your own device. Once installed, ESPN appears in the launcher app drawer and opens through **remote Settings → Open ESPN**. Signing in, subscriptions and content availability are handled by ESPN; this source provides no service access. No third-party ESPN APK is bundled.
 
 ## Current defaults and limits
 

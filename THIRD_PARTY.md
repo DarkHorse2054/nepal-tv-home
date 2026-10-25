@@ -45,3 +45,7 @@ Version 17 / 4.4.1-compact-brand-icons includes two unmodified PNGs from the bra
 The stored PNG bytes match the archive originals. Display scaling preserves their proportions, colors and transparency. See [the compact-icon note](launcher/BRAND-ICONS.md) for their use alongside native installed-app icons.
 
 The phone remote reuses these same unmodified PNGs at `remote/dist/assets/netflix.png` and `youtube.png`; the same copyright, trademark and license exclusions apply. The remote's mountain/control icon is original SVG artwork.
+
+## Weather service
+
+Current conditions and forecasts come from [Open-Meteo](https://open-meteo.com/), with attribution in both the remote and on-TV panels. See the provider’s [API documentation](https://open-meteo.com/en/docs) and [terms](https://open-meteo.com/en/terms). Requests go to the fixed HTTPS forecast endpoint. No Open-Meteo server or client-library source is vendored in this repository.

@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Nepal Home</string>
     <string name="sources" translatable="false">Sources</string>
+    <string name="tools" translatable="false">Tools</string>
     <string name="inputs">Inputs</string>
     <string name="wifi">Wi-Fi</string>
     <string name="settings">Settings</string>

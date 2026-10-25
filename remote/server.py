@@ -26,6 +26,17 @@ from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
+
+def load_device_features():
+    spec = importlib.util.spec_from_file_location("nepal_remote_device_features", HERE / "device_features.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+FEATURES = load_device_features()
+
+
 def load_local_config():
     spec = importlib.util.spec_from_file_location("portable_remote_config", HERE / "config.py")
     module = importlib.util.module_from_spec(spec)
@@ -47,6 +58,7 @@ APPS = {
     "paramount": "com.cbs.ott/com.paramount.android.pplus.features.splash.tv.SplashMediatorActivity",
     "hulu": "com.hulu.plus/.SplashActivity",
     "npl": "app.nepal.npltv/.MainActivity",
+    "espn": "com.espn.gtv/com.espn.startup.presentation.StartupActivity",
 }
 TEXT_MAX_LENGTH = 160
 TEXT_MAX_SEGMENTS = 4
@@ -226,6 +238,10 @@ class AdbBridge:
             args = ["shell", "am", "start", "-n", APPS[value]]
         elif kind == "text":
             args = ["shell", text_command(value)]
+        elif kind == "wallpaper" and value in FEATURES.WALLPAPER_MODES:
+            args = ["shell", "am", "broadcast", "--user", "0", "-n",
+                    "com.gathin.tvhome/.WallpaperCommandReceiver", "-a",
+                    "com.gathin.tvhome.action.SET_WALLPAPER", "--es", "mode", value]
         else:
             raise ApiError(400, "invalid_control")
         if not self.control_rate.allow("all"):
@@ -248,6 +264,24 @@ class AdbBridge:
                 raise
             if status or re.search(r"(?:^|\n)(?:Error:|Exception|SecurityException|java\.)", output):
                 raise ApiError(503, "text_send_uncertain" if kind == "text" else "command_failed")
+            if kind == "wallpaper" and not re.search(r'Broadcast completed: result=1, data="wallpaper_applied"(?:,|$)', output):
+                raise ApiError(503, "wallpaper_unavailable")
+        finally:
+            self.command_lock.release()
+
+    def device_readings(self):
+        """Read only fixed system totals, never reconnect or queue behind controls."""
+        if not self.command_lock.acquire(blocking=False):
+            return None, None, None
+        try:
+            try:
+                if not self._probe(reconnect=False):
+                    return False, None, None
+                memory_status, memory = self._run(["-s", self.serial, "shell", "cat", "/proc/meminfo"], timeout=1)
+                storage_status, storage = self._run(["-s", self.serial, "shell", "df", "-k", "/data"], timeout=1)
+                return True, memory if memory_status == 0 else None, storage if storage_status == 0 else None
+            except ApiError:
+                return False, None, None
         finally:
             self.command_lock.release()
 
@@ -437,7 +471,7 @@ class SamsungBridge:
 
 
 class RemoteApp:
-    def __init__(self, bridge, hosts, port, dist=HERE / "dist", pairing=None, samsung=None, config=None):
+    def __init__(self, bridge, hosts, port, dist=HERE / "dist", pairing=None, samsung=None, config=None, device=None, weather=None):
         self.bridge, self.hosts, self.port = bridge, set(hosts), port
         self.dist = Path(dist).resolve()
         self.pairing = pairing or Pairing()
@@ -445,6 +479,10 @@ class RemoteApp:
         self.dates = CivilDates(self.config["clocks"])
         self.samsung = samsung if samsung is not None else SamsungBridge(self.config["samsung"])
         self.status_rate = WindowLimiter(60, 60)
+        self.feature_rate = WindowLimiter(30, 60)
+        self.device = device if device is not None else FEATURES.DeviceSamples(lambda: self.bridge.device_readings())
+        self.weather = weather if weather is not None else FEATURES.WeatherForecast(
+            self.config.get("weather"), self.config["clocks"]["local_timezone"])
 
     def authority(self, raw):
         if not raw or any(c in raw for c in "@/\\#? \t\r\n"):
@@ -524,6 +562,12 @@ class RemoteApp:
                 "serverTime": datetime.now(timezone.utc).isoformat()}
 
 
+    def get_feature(self, name, token_id):
+        if not self.feature_rate.allow(token_id):
+            raise ApiError(429, "feature_rate_limited")
+        return (self.device if name == "device" else self.weather).status()
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "NepalRemote"
@@ -573,13 +617,16 @@ class Handler(BaseHTTPRequestHandler):
                 if parsed.path == "/api/status":
                     token = app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
                     self.respond(200, app.get_status(token), head=method == "HEAD")
+                elif parsed.path in ("/api/device", "/api/weather"):
+                    token = app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
+                    self.respond(200, app.get_feature(parsed.path.rsplit("/", 1)[1], token), head=method == "HEAD")
                 elif parsed.path.startswith("/api/"):
                     raise ApiError(404, "not_found")
                 else:
                     body, mime = app.static(parsed.path)
                     self.respond(200, body, mime, head=method == "HEAD")
                 return
-            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", "/api/text", "/api/reconnect", *SAMSUNG_PATHS):
+            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", "/api/text", "/api/reconnect", "/api/wallpaper", *SAMSUNG_PATHS):
                 raise ApiError(405, "method_not_allowed")
             if parsed.path != "/api/pair":
                 app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
@@ -592,6 +639,13 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json_object)
             except (ValueError, UnicodeError):
                 raise ApiError(400, "invalid_json")
+            if parsed.path == "/api/wallpaper":
+                if (not isinstance(payload, dict) or set(payload) != {"mode"}
+                        or not isinstance(payload["mode"], str) or payload["mode"] not in FEATURES.WALLPAPER_MODES):
+                    raise ApiError(400, "invalid_wallpaper_mode")
+                app.bridge.command("wallpaper", payload["mode"])
+                self.respond(200, {"ok": True, "mode": payload["mode"]})
+                return
             if parsed.path == "/api/reconnect":
                 if not isinstance(payload, dict) or payload:
                     raise ApiError(400, "invalid_payload")

@@ -20,9 +20,10 @@
             </LinearLayout>
             <LinearLayout android:id="@+id/topButtons" android:layout_width="wrap_content" android:layout_height="match_parent"
                 android:layout_alignParentEnd="true" android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView android:id="@+id/btnSources" style="@style/TopButton" android:contentDescription="@string/sources" android:drawableStart="@drawable/ic_sources" android:nextFocusRight="@+id/btnWifi" android:nextFocusDown="@+id/grid" />
-                <TextView android:id="@+id/btnWifi" style="@style/TopButton" android:contentDescription="@string/wifi" android:drawableStart="@drawable/ic_wifi" android:nextFocusDown="@+id/grid" />
-                <TextView android:id="@+id/btnSettings" style="@style/TopButton" android:contentDescription="@string/settings" android:drawableStart="@drawable/ic_settings" android:nextFocusDown="@+id/grid" />
+                <TextView android:id="@+id/btnTools" style="@style/TopButton" android:contentDescription="@string/tools" android:drawableStart="@drawable/ic_tools" android:nextFocusRight="@+id/btnSources" android:nextFocusDown="@+id/grid" />
+                <TextView android:id="@+id/btnSources" style="@style/TopButton" android:contentDescription="@string/sources" android:drawableStart="@drawable/ic_sources" android:nextFocusLeft="@+id/btnTools" android:nextFocusRight="@+id/btnWifi" android:nextFocusDown="@+id/grid" />
+                <TextView android:id="@+id/btnWifi" style="@style/TopButton" android:contentDescription="@string/wifi" android:drawableStart="@drawable/ic_wifi" android:nextFocusLeft="@+id/btnSources" android:nextFocusRight="@+id/btnSettings" android:nextFocusDown="@+id/grid" />
+                <TextView android:id="@+id/btnSettings" style="@style/TopButton" android:contentDescription="@string/settings" android:drawableStart="@drawable/ic_settings" android:nextFocusLeft="@+id/btnWifi" android:nextFocusDown="@+id/grid" />
             </LinearLayout>
         </RelativeLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="190dp" android:layout_marginTop="42dp"

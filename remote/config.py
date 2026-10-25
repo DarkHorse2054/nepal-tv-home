@@ -1,5 +1,6 @@
 """Validated local configuration. Importing this module never probes a device."""
 import hashlib
+import importlib.util
 import ipaddress
 import json
 import os
@@ -12,6 +13,9 @@ HERE = Path(__file__).resolve().parent
 DIST = (HERE / "dist").resolve()
 STATE = HERE / "state"
 DEFAULT_CONFIG = STATE / "config.json"
+FEATURE_SPEC = importlib.util.spec_from_file_location("portable_remote_features", HERE / "device_features.py")
+FEATURES = importlib.util.module_from_spec(FEATURE_SPEC)
+FEATURE_SPEC.loader.exec_module(FEATURES)
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in
                          ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,95}", re.ASCII)
@@ -104,12 +108,19 @@ def validate_clocks(value):
 
 
 def validate(value):
-    if not isinstance(value, dict) or set(value) != {"schema_version", "fire_tv", "clocks", "samsung"}:
-        raise ConfigError("Configuration must contain schema_version, fire_tv, clocks and samsung")
+    required = {"schema_version", "fire_tv", "clocks", "samsung"}
+    if not isinstance(value, dict) or not required <= set(value) or set(value) - required - {"weather"}:
+        raise ConfigError("Configuration must contain schema_version, fire_tv, clocks and samsung, with optional weather")
     if type(value["schema_version"]) is not int or value["schema_version"] != 1:
         raise ConfigError("Only configuration schema_version 1 is supported")
-    return {"schema_version": 1, "fire_tv": validate_fire_tv(value["fire_tv"]),
-            "clocks": validate_clocks(value["clocks"]), "samsung": validate_samsung(value["samsung"])}
+    result = {"schema_version": 1, "fire_tv": validate_fire_tv(value["fire_tv"]),
+              "clocks": validate_clocks(value["clocks"]), "samsung": validate_samsung(value["samsung"])}
+    if "weather" in value:
+        try:
+            result["weather"] = FEATURES.validate_weather(value["weather"])
+        except ValueError as error:
+            raise ConfigError(str(error)) from None
+    return result
 
 
 def fingerprint(value):

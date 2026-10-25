@@ -34,6 +34,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Explicit ADB command. Ordinary apps cannot send this broadcast: the
+             sender must hold Android's privileged development DUMP permission. -->
+        <receiver
+            android:name=".WallpaperCommandReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <!-- Screensaver: pick it in Settings, or `settings put secure screensaver_components
              com.gathin.tvhome/.ClockDream` over adb. -->
         <service

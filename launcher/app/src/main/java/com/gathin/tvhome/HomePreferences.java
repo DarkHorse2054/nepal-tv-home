@@ -88,6 +88,18 @@ final class HomePreferences {
         preferences(context).edit().putString(WALLPAPER, valid(value, WALLPAPER_VALUES, "auto")).apply();
     }
 
+    static void registerWallpaperListener(Context context, SharedPreferences.OnSharedPreferenceChangeListener listener) {
+        preferences(context).registerOnSharedPreferenceChangeListener(listener);
+    }
+
+    static void unregisterWallpaperListener(Context context, SharedPreferences.OnSharedPreferenceChangeListener listener) {
+        preferences(context).unregisterOnSharedPreferenceChangeListener(listener);
+    }
+
+    static boolean isWallpaperPreference(String key) {
+        return WALLPAPER.equals(key);
+    }
+
     static void setDimPercent(Context context, int value) {
         preferences(context).edit().putInt(DIM, Math.max(0, Math.min(80, value))).apply();
     }

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Rect;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -50,6 +51,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private DockDecoration dockDecoration;
     private TextView btnWifi;
     private SamsungSourcesDialog sourcesDialog;
+    private HomeToolsDialog toolsDialog;
     private SpringAnimation springX, springY;
     private float glassTargetX, glassTargetY;
     private boolean glassShown;
@@ -61,6 +63,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private float density;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    /** Retained while visible so an ADB wallpaper command repaints Home immediately. */
+    private final SharedPreferences.OnSharedPreferenceChangeListener wallpaperListener = (preferences, key) -> {
+        if (HomePreferences.isWallpaperPreference(key) && backdrop != null) backdrop.refreshAppearance();
+    };
     /** Refreshes the network pill when the connection changes: at boot Wi-Fi often connects after Home is shown. */
     private final ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
         @Override
@@ -133,6 +139,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
 
         View btnSettings = findViewById(R.id.btnSettings);
+        View btnTools = findViewById(R.id.btnTools);
+        btnTools.setOnClickListener(view -> {
+            if (toolsDialog != null && toolsDialog.isShowing()) return;
+            toolsDialog = new HomeToolsDialog(this);
+            toolsDialog.show();
+        });
         View btnSources = findViewById(R.id.btnSources);
         btnSources.setOnClickListener(v -> showSources(false));
         btnSources.setOnLongClickListener(v -> {
@@ -151,10 +163,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View.OnKeyListener pillKeys = (v, keyCode, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) return true;
-            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v.getId() == R.id.btnSources) return true;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v.getId() == R.id.btnTools) return true;
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == R.id.btnSettings;
         };
         btnWifi.setOnKeyListener(pillKeys);
+        btnTools.setOnKeyListener(pillKeys);
         btnSources.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
 
@@ -171,6 +184,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onResume() {
         super.onResume();
+        HomePreferences.registerWallpaperListener(this, wallpaperListener);
         glassShown = false;
         glass.setAlpha(0f);
         // Read these before reload(): rebinding can move focus to the first tile and overwrite them.
@@ -200,7 +214,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onPause() {
         super.onPause();
+        HomePreferences.unregisterWallpaperListener(this, wallpaperListener);
         if (sourcesDialog != null) sourcesDialog.dismiss();
+        if (toolsDialog != null) toolsDialog.dismiss();
         handler.removeCallbacks(minuteTick);
         adapter.cancelPendingPress();
     }
@@ -217,6 +233,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onNewIntent(intent);
         // Home returns to the launcher, even when Samsung navigation was open before changing inputs.
         if (sourcesDialog != null) sourcesDialog.dismiss();
+        if (toolsDialog != null) toolsDialog.dismiss();
+        // Intent extras never change appearance. Re-read only our private saved mode.
+        if (backdrop != null) backdrop.refreshAppearance();
     }
 
     @Override

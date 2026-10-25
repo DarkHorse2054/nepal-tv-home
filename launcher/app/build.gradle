@@ -10,8 +10,8 @@ android {
         applicationId 'com.gathin.tvhome'
         minSdk 25
         targetSdk 29
-        versionCode 18
-        versionName '4.4.2-compact-brand-icons'
+        versionCode 20
+        versionName '4.6.0-home-tools'
     }
 
     buildTypes {
