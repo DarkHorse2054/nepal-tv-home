@@ -101,6 +101,7 @@ Every POST requires same-origin Origin, JSON and the paired webpage bearer token
 | POST /api/app | `{"app":"paramount"}` | Launch one fixed known app component |
 | POST /api/text | `{"text":"Kathmandu"}` | Send bounded text once to the selected field |
 | POST /api/reconnect | `{}` | Check the configured Fire TV; returns `{ok:true,online:boolean}` |
+| POST /api/preview/frame | `{}` | One bounded JPEG screen capture; explicit Start in the phone sheet |
 | POST /api/samsung/pair | `{}` | Explicit bounded Samsung approval request |
 | POST /api/samsung/key | `{"key":"source"}` | One allowlisted Samsung panel/navigation/test click |
 
@@ -115,6 +116,28 @@ Samsung keys: `source`, `up`, `down`, `left`, `right`, `ok`, `back`, `volume_up`
 Home sends native Android key code 3. This remote does not change the default launcher, create a redirector, or root a device. `ok:true` means the transport accepted a command, not that the TV's visible result or DRM playback was independently verified.
 
 Date status includes `localDate`, `localTime`, `localLabel`, `secondaryDate`, `secondaryTime` and `secondaryLabel`. The historical `sanMateo`, `nepal` and `kathmanduTime` fields remain aliases for existing frontend compatibility; they use your configured zones. The bundled BS calendar ends at BS 2083 and falls back to Gregorian beyond its table. Its license is retained in `data/NEPALI-CALENDAR-LICENSE.txt`.
+
+## Screen preview
+
+Choose **Screen preview** below the Tools row, then **Start preview**. Opening the sheet does not capture anything. It shows refreshed screenshots of the Fire TV, with a D-pad, Back and Home inside the sheet. Requests run one at a time; the next starts three seconds after the previous request finishes, so capture time adds to that interval. The displayed time marks the start of the capture attempt, alongside its transfer latency. This preview refreshes still images and has no audio.
+
+**Stop preview** pauses updates and retains the last image, labeled as paused. Closing the sheet, opening another sheet, hiding/leaving the page, losing the connection or ending the session stops requests and clears the image. Starting again is explicit. A request already accepted by the server may finish within its bounded deadline after the browser cancels; there is no continuing recorder or server-side capture loop.
+
+Preview requires the companion computer to stay awake, Fire TV to be reachable, and its existing ADB authorization to remain valid. It captures the **Fire TV stick's output only**: Samsung apps, Samsung's native AirPlay receiver and other HDMI sources are outside it. Protected video or secure windows may be blank. Images can include visible messages, account details or other screen content; only start preview when you intend to view that screen.
+
+Preview additionally needs [Pillow](https://pillow.readthedocs.io/en/stable/installation/basic-installation.html) in the Python environment that runs the companion:
+
+```sh
+python3 -m pip install --upgrade Pillow
+```
+
+Use that environment's Python executable if it differs from `python3`. Pillow is optional: without it, pairing, remote controls and the other tools still work, while preview reports `preview_dependency_missing`.
+
+Each frame is an authenticated same-origin `POST /api/preview/frame` with the exact JSON body `{}` and the existing bearer session header. GET and HEAD never capture. The response is `image/jpeg` with `Cache-Control: no-store`, `X-Preview-Captured-At` in UTC and `X-Preview-Capture-Ms`. Session tokens stay in headers, never image URLs. No capture is triggered by ordinary status polling.
+
+The backend checks the configured TV identity for every capture, without reconnecting or waking it. It permits one capture globally, a two-second cooldown after each attempt and at most twenty requests per minute per paired session. Capture uses an independent lock so its binary transfer does not hold the input-control lock; the brief identity check still shares the existing control lock. ADB output is capped at 32 MiB, with a twenty-second capture deadline and process cleanup. A fixed command uses the TV's built-in `gzip -1` for raw screenshot pixels when available, with PNG fallback when gzip is absent. Gzip expansion is bounded to 40,000,016 bytes; decoded RGB, RGBA or RGBX buffers must have an exact supported 12- or 16-byte header and pixel length. Both capture paths reject images beyond 4096 pixels per side or ten million pixels. The Mac converts accepted images in memory to a JPEG no larger than 1280 × 720 and 1 MiB. Production frames are neither written to disk nor logged, and are not cached across viewers. The browser replaces and revokes its temporary image URLs; the existing trusted-LAN HTTP requirements still apply.
+
+Errors include `preview_busy` and `preview_rate_limited` (429), plus `preview_unavailable`, `preview_dependency_missing`, `preview_invalid_image` and `preview_timeout` (503). Existing pairing and Fire TV availability errors also apply. A failed frame is never presented as a new capture.
 
 ## Native television AirPlay
 

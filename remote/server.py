@@ -37,6 +37,16 @@ def load_device_features():
 FEATURES = load_device_features()
 
 
+def load_screen_preview():
+    spec = importlib.util.spec_from_file_location("nepal_screen_preview", HERE / "screen_preview.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+PREVIEW = load_screen_preview()
+
+
 def load_local_config():
     spec = importlib.util.spec_from_file_location("portable_remote_config", HERE / "config.py")
     module = importlib.util.module_from_spec(spec)
@@ -65,7 +75,7 @@ TEXT_MAX_SEGMENTS = 4
 MONTHS = ("Baisakh", "Jestha", "Ashadh", "Shrawan", "Bhadra", "Ashwin",
           "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
-       "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+       "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; "
        "manifest-src 'self'; base-uri 'none'; form-action 'self'; "
        "frame-ancestors 'none'; object-src 'none'")
 
@@ -285,6 +295,18 @@ class AdbBridge:
         finally:
             self.command_lock.release()
 
+    def capture_screen_png(self):
+        # Identity checks are short; the binary capture never holds the input lock.
+        if not self.command_lock.acquire(blocking=False):
+            raise ApiError(429, "preview_busy")
+        try:
+            if not self._probe(reconnect=False):
+                raise ApiError(503, "tv_unavailable")
+        finally:
+            self.command_lock.release()
+        import os
+        return PREVIEW.capture_png(self.adb, self.serial, dict(os.environ))
+
     def reconnect(self):
         """A fresh, serialized identity check; inputs are never queued or replayed."""
         if not self.control_rate.allow("all"):
@@ -471,7 +493,7 @@ class SamsungBridge:
 
 
 class RemoteApp:
-    def __init__(self, bridge, hosts, port, dist=HERE / "dist", pairing=None, samsung=None, config=None, device=None, weather=None):
+    def __init__(self, bridge, hosts, port, dist=HERE / "dist", pairing=None, samsung=None, config=None, device=None, weather=None, preview=None):
         self.bridge, self.hosts, self.port = bridge, set(hosts), port
         self.dist = Path(dist).resolve()
         self.pairing = pairing or Pairing()
@@ -480,6 +502,8 @@ class RemoteApp:
         self.samsung = samsung if samsung is not None else SamsungBridge(self.config["samsung"])
         self.status_rate = WindowLimiter(60, 60)
         self.feature_rate = WindowLimiter(30, 60)
+        self.preview_rate = WindowLimiter(20, 60)
+        self.preview = preview if preview is not None else PREVIEW.ScreenPreview(lambda: self.bridge.capture_screen_png())
         self.device = device if device is not None else FEATURES.DeviceSamples(lambda: self.bridge.device_readings())
         self.weather = weather if weather is not None else FEATURES.WeatherForecast(
             self.config.get("weather"), self.config["clocks"]["local_timezone"])
@@ -562,6 +586,14 @@ class RemoteApp:
                 "serverTime": datetime.now(timezone.utc).isoformat()}
 
 
+    def preview_frame(self, token_id):
+        if not self.preview_rate.allow(token_id):
+            raise ApiError(429, "preview_rate_limited")
+        try:
+            return self.preview.frame()
+        except PREVIEW.PreviewError as error:
+            raise ApiError(error.status, error.code) from None
+
     def get_feature(self, name, token_id):
         if not self.feature_rate.allow(token_id):
             raise ApiError(429, "feature_rate_limited")
@@ -583,7 +615,7 @@ class Handler(BaseHTTPRequestHandler):
     def send_response(self, code, message=None):
         super().send_response(code, message)
 
-    def respond(self, status, payload, mime="application/json; charset=utf-8", head=False):
+    def respond(self, status, payload, mime="application/json; charset=utf-8", head=False, extra_headers=()):
         body = json.dumps(payload, separators=(",", ":")).encode() if isinstance(payload, dict) else payload
         self.send_response(status)
         self.send_header("Content-Type", mime)
@@ -595,6 +627,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header("Connection", "close")
+        for name, value in extra_headers:
+            self.send_header(name, str(value))
         if status == 401:
             self.send_header("WWW-Authenticate", 'Bearer realm="fire-tv-remote"')
         if status == 429:
@@ -626,10 +660,10 @@ class Handler(BaseHTTPRequestHandler):
                     body, mime = app.static(parsed.path)
                     self.respond(200, body, mime, head=method == "HEAD")
                 return
-            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", "/api/text", "/api/reconnect", "/api/wallpaper", *SAMSUNG_PATHS):
+            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", "/api/text", "/api/reconnect", "/api/wallpaper", "/api/preview/frame", *SAMSUNG_PATHS):
                 raise ApiError(405, "method_not_allowed")
             if parsed.path != "/api/pair":
-                app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
+                token_id = app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
             if self.headers.get_content_type() != "application/json":
                 raise ApiError(415, "json_required")
             try:
@@ -639,6 +673,14 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json_object)
             except (ValueError, UnicodeError):
                 raise ApiError(400, "invalid_json")
+            if parsed.path == "/api/preview/frame":
+                if not isinstance(payload, dict) or payload:
+                    raise ApiError(400, "invalid_payload")
+                frame, captured_at, duration_ms = app.preview_frame(token_id)
+                self.respond(200, frame, "image/jpeg", extra_headers=(
+                    ("X-Preview-Captured-At", captured_at),
+                    ("X-Preview-Capture-Ms", duration_ms)))
+                return
             if parsed.path == "/api/wallpaper":
                 if (not isinstance(payload, dict) or set(payload) != {"mode"}
                         or not isinstance(payload["mode"], str) or payload["mode"] not in FEATURES.WALLPAPER_MODES):

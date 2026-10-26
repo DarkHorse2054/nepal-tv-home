@@ -19,6 +19,7 @@ A calm, dark home screen for Fire TV with Himalayan scenes, an English clock, a 
 - AirPlay connection help in TV Home and the phone remote, using a compatible television's built-in receiver.
 - An optional phone/web remote with the same tools, a glass D-pad, app dock, Type on TV, Samsung controls and connection recovery.
 - An ESPN launch shortcut in remote Settings; install the official app separately.
+- Optional Fire TV screen preview in the phone remote, with explicit Start/Stop, capture timestamps and an in-sheet D-pad; refreshed images, no audio.
 
 Netflix, YouTube, Disney+, Paramount+ and Hulu are the default favorites. Install the apps separately; subscriptions are not included.
 
@@ -29,6 +30,10 @@ The redesigned companion uses a warm Himalayan theme, a floating app dock and ma
 <img src="docs/images/remote.png" alt="Nepal Remote with Samsung controls, a sculpted directional pad and a compact app dock" width="360">
 
 *Remote interface. The computer must stay awake while using the phone remote; on-TV Tools run directly on the Fire TV. Native AirPlay streams directly to a compatible television and does not require the companion computer.*
+
+**Screen preview**, below the remote's Tools row, starts only after you select **Start preview**. It shows Fire TV screenshots with navigation controls, then waits three seconds after each request before capturing again. Stop retains a paused image; closing or leaving clears it. Keep the companion computer awake. This does not show Samsung apps, native AirPlay or other HDMI sources, and protected video may be blank. Preview alone requires optional Pillow; see [preview setup and limits](remote/README.md#screen-preview).
+
+<img src="docs/images/screen-preview.png" alt="Actual Fire TV screen preview, paused, with capture time and navigation controls" width="360">
 
 Follow [remote setup](remote/README.md) to configure your own devices and start the local server. NPL TV is an optional sixth dock shortcut. ESPN opens from remote Settings or the launcher’s app drawer after installation. These apps and their subscriptions are not included.
 

@@ -37,6 +37,12 @@
     feature_rate_limited: 'Give the remote a moment, then refresh.',
     invalid_wallpaper_mode: 'Choose Auto, Morning, Dusk or Night.',
     wallpaper_unavailable: 'Wallpaper control is unavailable. Check that Nepal Home is up to date.',
+    preview_busy: 'Another capture is finishing. Waiting a moment…',
+    preview_rate_limited: 'Giving Fire TV a moment before the next capture…',
+    preview_unavailable: 'Screen capture is unavailable. Reconnect Fire TV and try again.',
+    preview_dependency_missing: 'Screen preview needs Pillow on the Mac. See remote setup.',
+    preview_invalid_image: 'Fire TV did not return a usable screen image. Try again.',
+    preview_timeout: 'Screen capture took too long. Try again.',
   };
   const keyButtons = [...document.querySelectorAll('[data-key]')];
   const appButtons = [...document.querySelectorAll('[data-app]')];
@@ -88,6 +94,9 @@
     for (const button of [...keyButtons, ...appButtons]) button.disabled = !fireReady;
     for (const button of samsungButtons) button.disabled = !samsungReady;
     $('#type-button').disabled = !fireReady;
+    $('#preview-button').disabled = !fireReady;
+    if (!fireReady && (previewRunning || previewUrl)) stopPreview();
+    renderPreviewState();
     $('#sources-button').disabled = !token || !serverAvailable || !samsungEnabled;
     $('#samsung-pair').disabled = !token || !serverAvailable || samsungBusy;
     $('#samsung-pair').hidden = samsungPaired;
@@ -174,6 +183,7 @@
   function openSheet(sheet) {
     invalidateCommands();
     clearToast();
+    if (sheet.id !== 'preview-dialog') stopPreview();
     for (const other of sheets) if (other !== sheet && other.open) other.close();
     if (!sheet.open) sheet.showModal();
   }
@@ -430,6 +440,111 @@
   const wallpaperModes = ['auto', 'morning', 'dusk', 'night'];
   const wallpaperButtons = [...document.querySelectorAll('[data-wallpaper]')];
 
+  let previewRunning = false;
+  let previewIntent = 0;
+  let previewTimer = null;
+  let previewController = null;
+  let previewUrl = '';
+  const PREVIEW_MAX_BYTES = 1024 * 1024;
+  function renderPreviewState() {
+    $('#preview-toggle').textContent = previewRunning ? 'Stop preview' : 'Start preview';
+    $('#preview-toggle').disabled = !previewRunning && (!token || !online || !serverAvailable || document.hidden);
+  }
+  function clearPreviewImage() {
+    $('#preview-image').hidden = true;
+    $('#preview-image').removeAttribute('src');
+    $('#preview-placeholder').hidden = false;
+    $('#preview-captured').textContent = 'No capture yet';
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = '';
+  }
+  function stopPreview(clear = true, message = 'Preview stopped') {
+    previewRunning = false;
+    previewIntent++;
+    clearTimeout(previewTimer);
+    previewTimer = null;
+    previewController?.abort();
+    previewController = null;
+    if (clear) clearPreviewImage();
+    $('#preview-state').textContent = message;
+    renderPreviewState();
+  }
+  async function refreshPreview() {
+    if (!previewRunning || previewController || !token || !online || !serverAvailable || document.hidden || !$('#preview-dialog').open) return;
+    const intent = previewIntent;
+    const requestToken = token;
+    const controller = new AbortController();
+    previewController = controller;
+    const current = () => intent === previewIntent && token === requestToken && previewRunning && !document.hidden && $('#preview-dialog').open;
+    const deadline = setTimeout(() => controller.abort(), 26000);
+    if (!previewUrl) $('#preview-state').textContent = 'Capturing Fire TV…';
+    try {
+      const response = await fetch('/api/preview/frame', {
+        method: 'POST', headers: { Authorization: `Bearer ${requestToken}`, Accept: 'image/jpeg', 'Content-Type': 'application/json' },
+        body: '{}', cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
+      });
+      if (!current()) return;
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        if (!current()) return;
+        if (response.status === 401) {
+          stopPreview(); saveToken(''); online = false; samsungPaired = false; renderState();
+          openPairing('Your session ended. Enter the code shown on your Mac.');
+          return;
+        }
+        const message = ERROR_MESSAGES[data.error] || 'Screen preview is unavailable. Try again.';
+        if (response.status === 429) { $('#preview-state').textContent = message; return; }
+        stopPreview(true, message);
+        return;
+      }
+      const length = Number(response.headers.get('Content-Length'));
+      if (response.headers.get('Content-Type') !== 'image/jpeg' || !Number.isInteger(length) || length <= 0 || length > PREVIEW_MAX_BYTES) throw new Error('invalid_preview');
+      const image = await response.blob();
+      if (!current()) return;
+      if (image.type !== 'image/jpeg' || image.size !== length || image.size > PREVIEW_MAX_BYTES) throw new Error('invalid_preview');
+      const signature = new Uint8Array(await image.slice(0, 3).arrayBuffer());
+      if (!current()) return;
+      if (signature[0] !== 255 || signature[1] !== 216 || signature[2] !== 255) throw new Error('invalid_preview');
+      const capturedAt = response.headers.get('X-Preview-Captured-At');
+      const captured = capturedAt && new Date(capturedAt);
+      if (!captured || !Number.isFinite(captured.getTime())) throw new Error('invalid_preview');
+      const nextUrl = URL.createObjectURL(image);
+      const previous = previewUrl;
+      previewUrl = nextUrl;
+      $('#preview-image').setAttribute('src', nextUrl);
+      $('#preview-image').hidden = false;
+      $('#preview-placeholder').hidden = true;
+      const duration = Number(response.headers.get('X-Preview-Capture-Ms'));
+      const elapsed = Number.isFinite(duration) && duration > 0 && duration <= 30000 ? ` · ${(duration / 1000).toFixed(1)}s to update` : '';
+      $('#preview-captured').textContent = `Capture started ${captured.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}${elapsed}`;
+      if ($('#preview-state').textContent !== 'Preview updating · no audio') $('#preview-state').textContent = 'Preview updating · no audio';
+      if (previous) URL.revokeObjectURL(previous);
+    } catch (error) {
+      if (current()) stopPreview(true, error.message === 'invalid_preview' ? ERROR_MESSAGES.preview_invalid_image : error.name === 'AbortError' ? ERROR_MESSAGES.preview_timeout : 'Cannot reach the Mac. Reconnect and try again.');
+    } finally {
+      clearTimeout(deadline);
+      if (previewController === controller) previewController = null;
+      if (current()) previewTimer = setTimeout(refreshPreview, 3000);
+    }
+  }
+  $('#preview-button').addEventListener('click', () => {
+    stopPreview(true, 'Ready when you are');
+    openSheet($('#preview-dialog'));
+  });
+  $('#preview-toggle').addEventListener('click', () => {
+    if (previewRunning) { stopPreview(false, 'Preview paused · last capture'); return; }
+    if (!token || !online || !serverAvailable || document.hidden) return;
+    previewRunning = true;
+    previewIntent++;
+    $('#preview-state').textContent = 'Capturing Fire TV…';
+    renderPreviewState();
+    refreshPreview();
+  });
+  $('#preview-image').addEventListener('error', () => { if (previewUrl) stopPreview(true, ERROR_MESSAGES.preview_invalid_image); });
+  $('#preview-dialog').addEventListener('close', () => { if (!$('#preview-dialog').open) stopPreview(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopPreview(); else renderPreviewState(); });
+  window.addEventListener('pagehide', () => stopPreview());
+
   function featureReady() { return Boolean(token && serverAvailable); }
   function renderToolsState() {
     for (const id of ['device-button', 'weather-button', 'wallpaper-button']) $(`#${id}`).disabled = !featureReady();
@@ -642,6 +757,10 @@
       if ($('#sources-dialog').open && target instanceof HTMLElement && target.closest('.samsung-pad') && !event.repeat) {
         const key = keyboardKeys[event.key];
         if (['up', 'down', 'left', 'right'].includes(key)) { event.preventDefault(); sendSamsung(key); }
+      }
+      if ($('#preview-dialog').open && target instanceof HTMLElement && target.closest('.preview-pad') && !event.repeat) {
+        const key = keyboardKeys[event.key];
+        if (['up', 'down', 'left', 'right'].includes(key)) { event.preventDefault(); sendKey(key); }
       }
       return;
     }

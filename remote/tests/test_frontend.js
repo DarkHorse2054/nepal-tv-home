@@ -67,6 +67,7 @@ class Element extends EventTarget {
   hasAttribute(name) { return Object.hasOwn(this.attributes, name); }
   getAttribute(name) { return this.attributes[name] ?? null; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  removeAttribute(name) { delete this.attributes[name]; }
   matches(selector) {
     return selector.split(',').some(part => {
       const value = part.trim();
@@ -160,6 +161,11 @@ class Clock {
 }
 
 function response(data, status = 200) { return { ok: status >= 200 && status < 300, status, json: async () => data }; }
+function previewResponse(options = {}) {
+  const blob = new Blob([Uint8Array.from([255, 216, 255, 217])], { type: options.mime || 'image/jpeg' });
+  const headers = { 'Content-Type': blob.type, 'Content-Length': String(options.length ?? blob.size), 'X-Preview-Captured-At': options.capturedAt ?? '2026-10-25T17:00:00+00:00' };
+  return { ok: true, status: 200, headers: { get: key => headers[key] || null }, blob: async () => blob };
+}
 function deviceFixture(overrides = {}) {
   return {
     online: true, sampledAt: '2026-10-25T17:00:00+00:00', ageSeconds: 1, stale: false,
@@ -187,6 +193,8 @@ function harness(fixtures = {}) {
   const clock = new Clock();
   const requests = [];
   const deferred = [];
+  const createdUrls = [];
+  const revokedUrls = [];
   const status = { online: true, device: { name: 'Test Fire TV' }, date: {}, samsung: { enabled: true, paired: true } };
   const fetch = (url, options) => {
     const request = { url, options, body: options.body ? JSON.parse(options.body) : undefined };
@@ -198,6 +206,7 @@ function harness(fixtures = {}) {
       if (!pending.ignoreAbort) options.signal.addEventListener('abort', () => pending.reject(Object.assign(new Error('Timed out'), { name: 'AbortError' })), { once: true });
       return pending.promise;
     }
+    if (url === '/api/preview/frame') return Promise.resolve(previewResponse(fixtures.preview));
     const defaults = {
       '/api/status': status,
       '/api/device': fixtures.device || deviceFixture(),
@@ -210,7 +219,7 @@ function harness(fixtures = {}) {
   const context = vm.createContext({
     document, window, HTMLElement: Element, HTMLButtonElement: Button, fetch,
     sessionStorage: { getItem: key => session.get(key), setItem: (key, value) => session.set(key, value), removeItem: key => session.delete(key) },
-    navigator: {}, AbortController, performance: { now: () => clock.now },
+    navigator: {}, AbortController, Uint8Array, URL: { createObjectURL: () => { const url = `blob:test-${createdUrls.length}`; createdUrls.push(url); return url; }, revokeObjectURL: url => revokedUrls.push(url) }, performance: { now: () => clock.now },
     setTimeout: clock.setTimeout.bind(clock), clearTimeout: clock.clear.bind(clock),
     setInterval: clock.setInterval.bind(clock), clearInterval: clock.clear.bind(clock),
   });
@@ -245,11 +254,11 @@ function harness(fixtures = {}) {
   }
   function defer(url, options = {}) {
     const pending = { url, ...options };
-    pending.promise = new Promise((resolve, reject) => { pending.resolve = (data = { ok: true }, code = 200) => resolve(response(data, code)); pending.reject = reject; });
+    pending.promise = new Promise((resolve, reject) => { pending.resolve = (data = { ok: true }, code = 200) => resolve(response(data, code)); pending.reject = reject; pending.resolveFrame = options => resolve(previewResponse(options)); });
     deferred.push(pending);
     return pending;
   }
-  return { document, window, clock, requests, get, click, pointer, tap, key, enterText, defer,
+  return { document, window, clock, requests, createdUrls, revokedUrls, get, click, pointer, tap, key, enterText, defer,
     calls: url => requests.filter(request => request.url === url) };
 }
 
@@ -674,4 +683,105 @@ test('AirPlay help remains available offline and opening it tears down device po
   assert.equal(ui.calls('/api/device').length, 1, 'AirPlay help does not keep device polling alive');
   assert.equal(ui.calls('/api/key').length, 0);
   assert.equal(ui.calls('/api/samsung/key').length, 0);
+});
+
+
+test('screen preview opens without capturing; Start sends one authenticated fixed frame request', async () => {
+  const ui = harness(); await flush();
+  ui.click('#preview-button'); await flush();
+  assert.equal(ui.calls('/api/preview/frame').length, 0);
+  assert.equal(ui.get('#preview-image').hidden, true);
+  ui.click('#preview-toggle'); await flush();
+  const request = ui.calls('/api/preview/frame')[0];
+  assert.equal(request.options.method, 'POST');
+  assert.equal(request.options.headers.Authorization, 'Bearer unit-test-token');
+  assert.deepEqual(request.body, {});
+  assert.equal(request.options.cache, 'no-store');
+  assert.equal(ui.get('#preview-image').hidden, false);
+  assert.match(ui.get('#preview-image').getAttribute('src'), /^blob:/);
+  assert.match(ui.get('#preview-captured').textContent, /Capture started/);
+  assert.equal(ui.get('#preview-toggle').textContent, 'Stop preview');
+});
+
+test('preview captures sequentially, revokes replaced frames, and pauses without another capture', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  const pending = ui.defer('/api/preview/frame');
+  ui.click('#preview-toggle'); await flush();
+  await ui.clock.advance(10000);
+  assert.equal(ui.calls('/api/preview/frame').length, 1);
+  pending.resolveFrame(); await flush();
+  await ui.clock.advance(3000);
+  assert.equal(ui.calls('/api/preview/frame').length, 2);
+  assert.deepEqual(ui.revokedUrls, [ui.createdUrls[0]]);
+  ui.click('#preview-toggle'); await flush();
+  assert.match(ui.get('#preview-state').textContent, /paused/);
+  assert.equal(ui.get('#preview-image').hidden, false);
+  await ui.clock.advance(15000);
+  assert.equal(ui.calls('/api/preview/frame').length, 2);
+});
+
+test('closing, hiding, leaving or losing connection clears preview and cancels further frames', async t => {
+  for (const reason of ['close', 'hidden', 'pagehide', 'offline']) await t.test(reason, async () => {
+    const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+    if (reason === 'close') ui.get('#preview-dialog').close();
+    if (reason === 'hidden') { ui.document.hidden = true; ui.document.dispatch('visibilitychange'); }
+    if (reason === 'pagehide') ui.window.dispatch('pagehide');
+    if (reason === 'offline') ui.window.dispatch('offline');
+    await flush(); await ui.clock.advance(10000);
+    assert.equal(ui.calls('/api/preview/frame').length, 1);
+    assert.equal(ui.get('#preview-image').hidden, true);
+    assert.equal(ui.get('#preview-image').getAttribute('src'), null);
+    assert.deepEqual(ui.revokedUrls, ui.createdUrls);
+  });
+});
+
+test('late frame after stop cannot restore a private image or restart preview', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  const pending = ui.defer('/api/preview/frame', { ignoreAbort: true });
+  ui.click('#preview-toggle'); await flush();
+  ui.get('#preview-dialog').close(); await flush();
+  assert.equal(pending.request.options.signal.aborted, true);
+  pending.resolveFrame(); await flush(); await ui.clock.advance(10000);
+  assert.equal(ui.get('#preview-image').hidden, true);
+  assert.equal(ui.createdUrls.length, 0);
+  assert.equal(ui.calls('/api/preview/frame').length, 1);
+});
+
+test('preview session expiry clears its image and opens pairing instead of retrying', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  const pending = ui.defer('/api/preview/frame'); ui.click('#preview-toggle'); await flush();
+  pending.resolve({ error: 'session_expired' }, 401); await flush();
+  assert.equal(ui.get('#pair-dialog').open, true);
+  assert.equal(ui.get('#preview-dialog').open, false);
+  assert.equal(ui.get('#preview-image').hidden, true);
+  await ui.clock.advance(10000);
+  assert.equal(ui.calls('/api/preview/frame').length, 1);
+});
+
+test('invalid or oversized preview response never gets an object URL', async t => {
+  for (const preview of [{ mime: 'image/svg+xml' }, { length: 1048577 }, { capturedAt: 'unknown' }]) await t.test(JSON.stringify(preview), async () => {
+    const ui = harness({ preview }); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+    assert.equal(ui.createdUrls.length, 0);
+    assert.equal(ui.get('#preview-image').hidden, true);
+    assert.match(ui.get('#preview-state').textContent, /usable screen image/);
+  });
+});
+
+test('preview navigation sends fixed TV actions while Escape only closes the preview', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  ui.key('ArrowUp', ui.get('.preview-up')); await flush();
+  assert.equal(ui.calls('/api/key')[0].body.key, 'up');
+  ui.key('Escape', ui.get('#preview-toggle')); await flush();
+  assert.equal(ui.get('#preview-dialog').open, false);
+  assert.equal(ui.calls('/api/key').length, 1);
+});
+
+test('preview remains disabled until paired and does not resume when visible again', async () => {
+  const unpaired = harness({ paired: false }); await flush();
+  assert.equal(unpaired.get('#preview-button').disabled, true);
+  const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+  ui.document.hidden = true; ui.document.dispatch('visibilitychange');
+  ui.document.hidden = false; ui.document.dispatch('visibilitychange'); await flush(); await ui.clock.advance(10000);
+  assert.equal(ui.calls('/api/preview/frame').length, 1);
+  assert.equal(ui.get('#preview-toggle').textContent, 'Start preview');
 });

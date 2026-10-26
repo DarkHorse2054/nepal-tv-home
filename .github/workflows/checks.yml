@@ -51,7 +51,10 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-      - name: Run offline standard-library tests
+      - name: Install optional screen-preview image dependency
+        # Install here so synthetic PNG, gzip/raw and JPEG checks run rather than skip.
+        run: python -m pip install --upgrade 'Pillow>=11.3'
+      - name: Run offline companion tests
         # Tests inject fake device transports. No ADB, TV, account or private config is needed.
         env:
           PYTHONDONTWRITEBYTECODE: "1"

@@ -37,6 +37,7 @@
     <symbol id="i-source" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="3"/><path d="M8 22h8M12 18v4M7 11h10m-3-3 3 3-3 3"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-preview" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="3"/><path d="M8 21h8m-4-4v4"/><circle cx="12" cy="10" r="3"/></symbol>
     <symbol id="i-airplay" viewBox="0 0 24 24"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1M12 13l7 8H5Z"/></symbol>
     <symbol id="i-device" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="4"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M8 2v3m8-3v3M8 19v3m8-3v3M2 8h3m-3 8h3m14-8h3m-3 8h3"/></symbol>
     <symbol id="i-weather" viewBox="0 0 24 24"><path d="M7 18a4 4 0 1 1 1-7.9A5.5 5.5 0 1 1 18.5 18Z"/><path d="M5 2v2M1 6l2 1m7-5-1 2M4 11a3 3 0 1 1 5-3"/></symbol>
@@ -104,12 +105,34 @@
       <button id="weather-button" class="tool-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-weather"/></svg><span>Weather</span></button>
       <button id="wallpaper-button" class="tool-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-wallpaper"/></svg><span>Wallpaper</span></button>
     </section>
+    <button id="preview-button" class="preview-launch" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-preview"/></svg><span>Screen preview</span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
     <footer class="page-footer">
       <button id="type-button" class="footer-key" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>Type on TV</button>
       <button id="settings-button" class="footer-key" type="button"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
     </footer>
     <p id="kathmandu-time" class="quiet-time"></p>
   </main>
+
+  <dialog id="preview-dialog" class="sheet preview-sheet" aria-labelledby="preview-title">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">FIRE TV · NO AUDIO</p><h2 id="preview-title">Screen preview</h2></div><button class="close-button" data-close type="button" aria-label="Close screen preview"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="preview-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <p id="preview-state" class="tool-status" role="status">Ready when you are</p>
+    <div class="preview-layout">
+      <div class="preview-view"><div class="preview-screen"><img id="preview-image" alt="Latest Fire TV screen capture" hidden><div id="preview-placeholder" class="preview-placeholder"><svg class="icon" aria-hidden="true"><use href="#i-preview"/></svg><span>Start to see your Fire TV</span></div></div><p id="preview-captured" class="tool-updated">No capture yet</p></div>
+      <div class="preview-controls">
+        <div class="preview-pad" role="group" aria-label="Preview Fire TV navigation">
+          <button class="preview-key preview-up" data-key="up" type="button" disabled aria-label="Preview up"><svg class="icon" aria-hidden="true"><use href="#i-up"/></svg></button>
+          <button class="preview-key preview-left" data-key="left" type="button" disabled aria-label="Preview left"><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
+          <button class="preview-key preview-ok" data-key="ok" type="button" disabled aria-label="Preview OK">OK</button>
+          <button class="preview-key preview-right" data-key="right" type="button" disabled aria-label="Preview right"><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
+          <button class="preview-key preview-down" data-key="down" type="button" disabled aria-label="Preview down"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg></button>
+        </div>
+        <div class="preview-nav"><button class="preview-key" data-key="back" type="button" disabled aria-label="Preview Back"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg><span>Back</span></button><button class="preview-key" data-key="home" type="button" disabled aria-label="Preview Home"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span>Home</span></button></div>
+      </div>
+    </div>
+    <button id="preview-toggle" class="primary-button" type="button" disabled>Start preview</button>
+    <p class="sheet-footnote">Images refresh every few seconds. Fire TV only; protected video may be blank. Keep your Mac awake.</p>
+  </dialog>
 
   <dialog id="airplay-dialog" class="sheet" aria-labelledby="airplay-title">
     <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">SAMSUNG TV</p><h2 id="airplay-title">AirPlay</h2></div><button class="close-button" data-close type="button" aria-label="Close AirPlay"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>

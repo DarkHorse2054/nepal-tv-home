@@ -9,6 +9,7 @@ import tempfile
 import threading
 import types
 import unittest
+import unittest.mock
 from fixtures import FIRE, SAMSUNG, CLOCKS, configuration, serial
 
 SPEC = importlib.util.spec_from_file_location("remote_server", Path(__file__).resolve().parents[1] / "server.py")
@@ -61,6 +62,41 @@ class RequestTests(unittest.TestCase):
         head, _, content = sock.output.getvalue().partition(b"\r\n\r\n")
         code = int(head.split(b" ", 2)[1])
         return code, head.decode(), content
+
+    def test_preview_requires_session_origin_post_and_empty_payload(self):
+        calls = []
+        self.app.preview = types.SimpleNamespace(frame=lambda: calls.append(True) or (b"jpeg-fixture", "2026-10-25T17:00:00+00:00", 2500))
+        self.assertEqual(self.request("POST", "/api/preview/frame", {})[0], 401)
+        self.assertEqual(self.request("POST", "/api/preview/frame", {}, auth=True, headers=[("Origin", "http://attacker.example")])[0], 403)
+        self.assertEqual(self.request("POST", "/api/preview/frame", {"serial": "other"}, auth=True)[0], 400)
+        self.assertEqual(self.request("POST", "/api/preview/frame", [], auth=True)[0], 400)
+        self.assertEqual(self.request("GET", "/api/preview/frame", auth=True)[0], 404)
+        self.assertEqual(self.request("HEAD", "/api/preview/frame", auth=True)[0], 404)
+        self.assertEqual(calls, [])
+        code, headers, body = self.request("POST", "/api/preview/frame", {}, auth=True)
+        self.assertEqual(code, 200)
+        self.assertEqual(body, b"jpeg-fixture")
+        self.assertIn("Content-Type: image/jpeg", headers)
+        self.assertIn("Cache-Control: no-store", headers)
+        self.assertIn("X-Preview-Captured-At: 2026-10-25T17:00:00+00:00", headers)
+        self.assertIn("X-Preview-Capture-Ms: 2500", headers)
+        self.assertIn("img-src 'self' data: blob:", headers)
+        self.assertNotIn("Access-Control-Allow", headers)
+        self.assertEqual(calls, [True])
+
+    def test_preview_rate_limit_and_stable_capture_error(self):
+        calls = []
+        self.app.preview = types.SimpleNamespace(frame=lambda: calls.append(True) or (b"jpeg-fixture", "2026-10-25T17:00:00+00:00", 1))
+        for _ in range(20):
+            self.assertEqual(self.request("POST", "/api/preview/frame", {}, auth=True)[0], 200)
+        self.assertEqual(self.request("POST", "/api/preview/frame", {}, auth=True)[0], 429)
+        self.assertEqual(len(calls), 20)
+        self.app.preview_rate = server.WindowLimiter(20, 60)
+        def fail(): raise server.PREVIEW.PreviewError('preview_timeout')
+        self.app.preview = types.SimpleNamespace(frame=fail)
+        code, _, body = self.request("POST", "/api/preview/frame", {}, auth=True)
+        self.assertEqual(code, 503)
+        self.assertEqual(json.loads(body)['error'], 'preview_timeout')
 
     def test_pair_and_authenticated_status(self):
         code, headers, content = self.request("POST", "/api/pair", {"pin":"123456"})
@@ -411,3 +447,35 @@ class CalendarTests(unittest.TestCase):
 
 
 if __name__=="__main__": unittest.main()
+
+
+class PreviewBridgeTests(unittest.TestCase):
+    def test_capture_rechecks_identity_never_reconnects_and_does_not_hold_controls(self):
+        calls = []
+        def runner(argv, **kwargs):
+            calls.append(argv)
+            output = "device" if argv[-1] == "get-state" else FIRE["model"]
+            return types.SimpleNamespace(returncode=0, stdout=output)
+        bridge = server.AdbBridge("/fixed/adb", FIRE, runner=runner)
+        def capture(adb, target, env):
+            self.assertFalse(bridge.command_lock.locked())
+            self.assertEqual(target, serial())
+            return b"png-fixture"
+        with unittest.mock.patch.object(server.PREVIEW, 'capture_png', capture):
+            self.assertEqual(bridge.capture_screen_png(), b"png-fixture")
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(any("connect" in call for call in calls))
+        self.assertEqual(calls[-1][-2:], ["getprop", "ro.product.model"])
+
+    def test_wrong_identity_and_busy_controls_never_capture(self):
+        bridge = server.AdbBridge("/fixed/adb", FIRE, runner=lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="WRONG"))
+        with unittest.mock.patch.object(server.PREVIEW, 'capture_png') as capture:
+            with self.assertRaises(server.ApiError): bridge.capture_screen_png()
+            capture.assert_not_called()
+            bridge.command_lock.acquire()
+            try:
+                with self.assertRaises(server.ApiError) as error: bridge.capture_screen_png()
+                self.assertEqual(error.exception.code, 'preview_busy')
+            finally:
+                bridge.command_lock.release()
+            capture.assert_not_called()
