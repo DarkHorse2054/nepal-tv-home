@@ -19,6 +19,9 @@ class EventTarget {
     if (!this.listeners.has(type)) this.listeners.set(type, []);
     this.listeners.get(type).push(listener);
   }
+  removeEventListener(type, listener) {
+    this.listeners.set(type, (this.listeners.get(type) || []).filter(value => value !== listener));
+  }
   dispatch(type, details = {}) {
     const event = {
       type, target: this, defaultPrevented: false,
@@ -96,6 +99,27 @@ class Element extends EventTarget {
   }
 }
 class Button extends Element {}
+class Video extends Element {
+  constructor(...args) {
+    super(...args);
+    this.paused = true;
+    this.readyState = 0;
+    this.playCalls = this.pauseCalls = this.loadCalls = 0;
+    this.nativeHls = true;
+    this.playError = null;
+  }
+  get src() { return this.getAttribute('src') || ''; }
+  set src(value) { this.setAttribute('src', value); }
+  canPlayType(type) { return this.nativeHls && type === 'application/vnd.apple.mpegurl' ? 'probably' : ''; }
+  play() {
+    this.playCalls++;
+    if (this.playError) return Promise.reject(this.playError);
+    this.paused = false; this.readyState = 2;
+    return Promise.resolve();
+  }
+  pause() { this.pauseCalls++; this.paused = true; }
+  load() { this.loadCalls++; this.readyState = 0; }
+}
 
 class Document extends EventTarget {
   constructor() {
@@ -118,7 +142,7 @@ class Document extends EventTarget {
       }
       const attributes = {};
       for (const match of token.slice(opening[0].length).matchAll(/([\w:-]+)(?:="([^"]*)")?/g)) attributes[match[1]] = match[2] ?? '';
-      const Constructor = opening[1] === 'button' ? Button : Element;
+      const Constructor = opening[1] === 'button' ? Button : opening[1] === 'video' ? Video : Element;
       const element = new Constructor(opening[1], attributes, this);
       element.parentElement = stack.at(-1) || null;
       element.parentElement?.childNodes.push(element);
@@ -195,7 +219,26 @@ function harness(fixtures = {}) {
   const deferred = [];
   const createdUrls = [];
   const revokedUrls = [];
+  const warnings = [];
   const status = { online: true, device: { name: 'Test Fire TV' }, date: {}, samsung: { enabled: true, paired: true } };
+  const livePlaylist = '/api/live/0123456789abcdef0123456789abcdef/index.m3u8';
+  const video = document.querySelector('#live-video');
+  video.nativeHls = fixtures.nativeHls !== false;
+  video.playError = fixtures.playError || null;
+  const players = [];
+  if (fixtures.hls) {
+    class FakeHls {
+      static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error' };
+      static isSupported() { return true; }
+      constructor(config) { this.config = config; this.listeners = new Map(); this.destroyed = false; players.push(this); }
+      on(event, listener) { this.listeners.set(event, listener); }
+      emit(event, data = {}) { this.listeners.get(event)?.(event, data); }
+      attachMedia(media) { this.media = media; }
+      loadSource(source) { this.source = source; }
+      destroy() { this.destroyed = true; this.listeners.clear(); }
+    }
+    window.Hls = FakeHls;
+  }
   const fetch = (url, options) => {
     const request = { url, options, body: options.body ? JSON.parse(options.body) : undefined };
     requests.push(request);
@@ -211,6 +254,10 @@ function harness(fixtures = {}) {
       '/api/status': status,
       '/api/device': fixtures.device || deviceFixture(),
       '/api/weather': fixtures.weather || weatherFixture(),
+      '/api/live/start': fixtures.liveStart || { state: 'starting', playlist: livePlaylist, videoOnly: true },
+      '/api/live/status': fixtures.liveStatus || { state: 'ready', playlist: livePlaylist, videoOnly: true },
+      '/api/live/keepalive': fixtures.liveKeepalive || { state: 'ready', playlist: livePlaylist, videoOnly: true },
+      '/api/live/stop': { state: 'stopped', videoOnly: true },
     };
     return Promise.resolve(response(defaults[url] || { ok: true, state: 'sent' }));
   };
@@ -218,6 +265,7 @@ function harness(fixtures = {}) {
   const session = new Map(fixtures.paired === false ? [] : [['nepal.remote.session', 'unit-test-token']]);
   const context = vm.createContext({
     document, window, HTMLElement: Element, HTMLButtonElement: Button, fetch,
+    console: { warn: (...values) => warnings.push(values) },
     sessionStorage: { getItem: key => session.get(key), setItem: (key, value) => session.set(key, value), removeItem: key => session.delete(key) },
     navigator: {}, AbortController, Uint8Array, URL: { createObjectURL: () => { const url = `blob:test-${createdUrls.length}`; createdUrls.push(url); return url; }, revokeObjectURL: url => revokedUrls.push(url) }, performance: { now: () => clock.now },
     setTimeout: clock.setTimeout.bind(clock), clearTimeout: clock.clear.bind(clock),
@@ -258,9 +306,11 @@ function harness(fixtures = {}) {
     deferred.push(pending);
     return pending;
   }
-  return { document, window, clock, requests, createdUrls, revokedUrls, get, click, pointer, tap, key, enterText, defer,
+  return { document, window, clock, requests, createdUrls, revokedUrls, warnings, players, livePlaylist, get, click, pointer, tap, key, enterText, defer,
     calls: url => requests.filter(request => request.url === url) };
 }
+
+function openSnapshots(ui) { ui.click('#preview-button'); ui.click('[data-view-mode="snapshots"]'); }
 
 test('two deliberate rapid arrow taps both send while the first request is pending', async () => {
   const ui = harness(); await flush();
@@ -688,7 +738,7 @@ test('AirPlay help remains available offline and opening it tears down device po
 
 test('screen preview opens without capturing; Start sends one authenticated fixed frame request', async () => {
   const ui = harness(); await flush();
-  ui.click('#preview-button'); await flush();
+  openSnapshots(ui); await flush();
   assert.equal(ui.calls('/api/preview/frame').length, 0);
   assert.equal(ui.get('#preview-image').hidden, true);
   ui.click('#preview-toggle'); await flush();
@@ -704,7 +754,7 @@ test('screen preview opens without capturing; Start sends one authenticated fixe
 });
 
 test('preview captures sequentially, revokes replaced frames, and pauses without another capture', async () => {
-  const ui = harness(); await flush(); ui.click('#preview-button');
+  const ui = harness(); await flush(); openSnapshots(ui);
   const pending = ui.defer('/api/preview/frame');
   ui.click('#preview-toggle'); await flush();
   await ui.clock.advance(10000);
@@ -722,7 +772,7 @@ test('preview captures sequentially, revokes replaced frames, and pauses without
 
 test('closing, hiding, leaving or losing connection clears preview and cancels further frames', async t => {
   for (const reason of ['close', 'hidden', 'pagehide', 'offline']) await t.test(reason, async () => {
-    const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+    const ui = harness(); await flush(); openSnapshots(ui); ui.click('#preview-toggle'); await flush();
     if (reason === 'close') ui.get('#preview-dialog').close();
     if (reason === 'hidden') { ui.document.hidden = true; ui.document.dispatch('visibilitychange'); }
     if (reason === 'pagehide') ui.window.dispatch('pagehide');
@@ -736,7 +786,7 @@ test('closing, hiding, leaving or losing connection clears preview and cancels f
 });
 
 test('late frame after stop cannot restore a private image or restart preview', async () => {
-  const ui = harness(); await flush(); ui.click('#preview-button');
+  const ui = harness(); await flush(); openSnapshots(ui);
   const pending = ui.defer('/api/preview/frame', { ignoreAbort: true });
   ui.click('#preview-toggle'); await flush();
   ui.get('#preview-dialog').close(); await flush();
@@ -748,7 +798,7 @@ test('late frame after stop cannot restore a private image or restart preview', 
 });
 
 test('preview session expiry clears its image and opens pairing instead of retrying', async () => {
-  const ui = harness(); await flush(); ui.click('#preview-button');
+  const ui = harness(); await flush(); openSnapshots(ui);
   const pending = ui.defer('/api/preview/frame'); ui.click('#preview-toggle'); await flush();
   pending.resolve({ error: 'session_expired' }, 401); await flush();
   assert.equal(ui.get('#pair-dialog').open, true);
@@ -760,7 +810,7 @@ test('preview session expiry clears its image and opens pairing instead of retry
 
 test('invalid or oversized preview response never gets an object URL', async t => {
   for (const preview of [{ mime: 'image/svg+xml' }, { length: 1048577 }, { capturedAt: 'unknown' }]) await t.test(JSON.stringify(preview), async () => {
-    const ui = harness({ preview }); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+    const ui = harness({ preview }); await flush(); openSnapshots(ui); ui.click('#preview-toggle'); await flush();
     assert.equal(ui.createdUrls.length, 0);
     assert.equal(ui.get('#preview-image').hidden, true);
     assert.match(ui.get('#preview-state').textContent, /usable screen image/);
@@ -768,7 +818,7 @@ test('invalid or oversized preview response never gets an object URL', async t =
 });
 
 test('preview navigation sends fixed TV actions while Escape only closes the preview', async () => {
-  const ui = harness(); await flush(); ui.click('#preview-button');
+  const ui = harness(); await flush(); openSnapshots(ui);
   ui.key('ArrowUp', ui.get('.preview-up')); await flush();
   assert.equal(ui.calls('/api/key')[0].body.key, 'up');
   ui.key('Escape', ui.get('#preview-toggle')); await flush();
@@ -779,9 +829,275 @@ test('preview navigation sends fixed TV actions while Escape only closes the pre
 test('preview remains disabled until paired and does not resume when visible again', async () => {
   const unpaired = harness({ paired: false }); await flush();
   assert.equal(unpaired.get('#preview-button').disabled, true);
-  const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+  const ui = harness(); await flush(); openSnapshots(ui); ui.click('#preview-toggle'); await flush();
   ui.document.hidden = true; ui.document.dispatch('visibilitychange');
   ui.document.hidden = false; ui.document.dispatch('visibilitychange'); await flush(); await ui.clock.advance(10000);
   assert.equal(ui.calls('/api/preview/frame').length, 1);
   assert.equal(ui.get('#preview-toggle').textContent, 'Start preview');
+});
+
+test('Live view opens passively in video mode without starting or probing a stream', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button'); await flush();
+  assert.equal(ui.get('[data-view-mode="video"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(ui.get('#preview-toggle').textContent, 'Start live video');
+  assert.equal(ui.get('#live-video').hidden, true);
+  assert.equal(ui.get('#live-video').playCalls, 0);
+  assert.equal(ui.requests.filter(request => request.url.startsWith('/api/live/')).length, 0);
+  assert.equal(ui.calls('/api/preview/frame').length, 0);
+  ui.get('#preview-dialog').close(); await flush();
+  assert.equal(ui.calls('/api/live/stop').length, 0, 'An unopened producer needs no stop request');
+});
+
+test('explicit Live start authenticates, waits for ready, and labels playing only after a media event', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+  const start = ui.calls('/api/live/start')[0];
+  assert.equal(start.options.method, 'POST');
+  assert.equal(start.options.headers.Authorization, 'Bearer unit-test-token');
+  assert.deepEqual(start.body, {});
+  assert.equal(start.options.credentials, 'same-origin');
+  assert.equal(ui.get('#live-video').hidden, true, 'Starting is not a playable stream');
+  await ui.clock.advance(1200);
+  const video = ui.get('#live-video');
+  assert.equal(ui.calls('/api/live/status').length, 1);
+  assert.equal(ui.calls('/api/live/status')[0].options.headers.Authorization, 'Bearer unit-test-token');
+  assert.equal(video.src, ui.livePlaylist);
+  assert.equal(video.hidden, false);
+  assert.equal(video.hasAttribute('muted'), true);
+  assert.equal(video.hasAttribute('playsinline'), true);
+  assert.equal(video.hasAttribute('controls'), true);
+  assert.equal(video.playCalls, 1);
+  assert.doesNotMatch(ui.get('#preview-state').textContent, /playing/);
+  video.dispatch('playing');
+  assert.match(ui.get('#preview-state').textContent, /playing/);
+  video.dispatch('waiting');
+  assert.match(ui.get('#preview-state').textContent, /Buffering/);
+  assert.equal(ui.calls('/api/preview/frame').length, 0, 'Video does not drive screenshot captures');
+  assert.equal(ui.get('#preview-toggle').textContent, 'Stop live view');
+});
+
+test('visible Live view renews its owner lease and polls without duplicating the player', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+  await ui.clock.advance(21000);
+  assert.equal(ui.calls('/api/live/keepalive').length, 2);
+  for (const request of ui.calls('/api/live/keepalive')) {
+    assert.equal(request.options.method, 'POST');
+    assert.equal(request.options.headers.Authorization, 'Bearer unit-test-token');
+    assert.deepEqual(request.body, {});
+  }
+  assert.equal(ui.get('#live-video').playCalls, 1);
+  assert.equal(ui.calls('/api/live/start').length, 1);
+});
+
+test('Live video falls back to a usable Play button when autoplay is rejected', async () => {
+  const ui = harness({ playError: new Error('NotAllowedError') }); await flush();
+  ui.click('#preview-button'); ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  assert.equal(ui.get('#live-play').hidden, false);
+  assert.match(ui.get('#preview-state').textContent, /Tap Play/);
+  assert.equal(ui.get('#live-video').hasAttribute('controls'), true);
+  ui.get('#live-video').playError = null;
+  ui.click('#live-play'); await flush();
+  assert.equal(ui.get('#live-video').playCalls, 2);
+  ui.get('#live-video').dispatch('playing');
+  assert.equal(ui.get('#live-play').hidden, true);
+  assert.match(ui.get('#preview-state').textContent, /playing/);
+});
+
+test('Chromium uses the local HLS player with bounded buffers and destroys it on stop', async () => {
+  const ui = harness({ nativeHls: false, hls: true }); await flush();
+  ui.click('#preview-button'); ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  assert.equal(ui.players.length, 1);
+  const player = ui.players[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(player.config)), { enableWorker: false, lowLatencyMode: false, liveSyncDurationCount: 3, maxBufferLength: 6 });
+  assert.equal(player.source, ui.livePlaylist);
+  assert.equal(player.media, ui.get('#live-video'));
+  assert.equal(ui.get('#live-video').playCalls, 0);
+  player.emit('manifest'); await flush();
+  assert.equal(ui.get('#live-video').playCalls, 1);
+  ui.click('#preview-toggle'); await flush();
+  assert.equal(player.destroyed, true);
+  assert.equal(ui.get('#live-video').hidden, true);
+  assert.equal(ui.get('#live-video').src, '');
+  assert.equal(ui.get('#live-video').paused, true);
+  assert.equal(ui.calls('/api/live/stop').length, 1);
+  assert.equal(ui.calls('/api/live/stop')[0].options.keepalive, true);
+  assert.equal(ui.calls('/api/live/stop')[0].options.headers.Authorization, 'Bearer unit-test-token');
+  await ui.clock.advance(30000);
+  assert.equal(ui.calls('/api/live/keepalive').length, 0);
+});
+
+test('supported MSE HLS is preferred even when the browser advertises native HLS', async () => {
+  const ui = harness({ nativeHls: true, hls: true }); await flush();
+  ui.click('#preview-button'); ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  assert.equal(ui.players.length, 1);
+  assert.equal(ui.players[0].source, ui.livePlaylist);
+  assert.equal(ui.get('#live-video').src, '', 'A native-support hint must not bypass the supported local MSE player');
+  assert.equal(ui.get('#live-video').playCalls, 0);
+  ui.players[0].emit('manifest'); await flush();
+  assert.equal(ui.get('#live-video').playCalls, 1);
+});
+
+test('native HLS remains the fallback when MSE HLS is unavailable', async () => {
+  const ui = harness({ nativeHls: true }); await flush();
+  ui.window.Hls = { isSupported: () => false };
+  ui.click('#preview-button'); ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  assert.equal(ui.players.length, 0);
+  assert.equal(ui.get('#live-video').src, ui.livePlaylist);
+  assert.equal(ui.get('#live-video').playCalls, 1);
+});
+
+test('closing, hiding, leaving, losing connection or switching modes stops continuous video', async t => {
+  for (const reason of ['close', 'hidden', 'pagehide', 'offline', 'snapshots', 'other-sheet']) await t.test(reason, async () => {
+    const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+    await ui.clock.advance(1200);
+    if (reason === 'close') ui.get('#preview-dialog').close();
+    if (reason === 'hidden') { ui.document.hidden = true; ui.document.dispatch('visibilitychange'); }
+    if (reason === 'pagehide') ui.window.dispatch('pagehide');
+    if (reason === 'offline') ui.window.dispatch('offline');
+    if (reason === 'snapshots') ui.click('[data-view-mode="snapshots"]');
+    if (reason === 'other-sheet') ui.click('#airplay-button');
+    await flush(); await ui.clock.advance(30000);
+    assert.equal(ui.calls('/api/live/stop').length, 1);
+    assert.equal(ui.get('#live-video').hidden, true);
+    assert.equal(ui.get('#live-video').src, '');
+    assert.equal(ui.get('#live-video').paused, true);
+    assert.equal(ui.calls('/api/live/keepalive').length, 0);
+    assert.equal(ui.calls('/api/preview/frame').length, 0, 'Mode switch remains passive');
+    if (reason === 'hidden') {
+      ui.document.hidden = false; ui.document.dispatch('visibilitychange'); await flush();
+      assert.equal(ui.calls('/api/live/start').length, 1, 'Becoming visible must not restart video');
+    }
+  });
+});
+
+test('late Start is stopped before a new generation can start and cannot restore video', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  const start = ui.defer('/api/live/start', { ignoreAbort: true });
+  const stop = ui.defer('/api/live/stop');
+  ui.click('#preview-toggle'); await flush();
+  ui.get('#preview-dialog').close(); await flush(); ui.click('#preview-button'); await flush();
+  assert.equal(ui.get('#preview-toggle').disabled, true);
+  assert.equal(ui.get('#preview-toggle').textContent, 'Stopping…');
+  assert.equal(ui.calls('/api/live/stop').length, 0, 'Do not race Stop ahead of pending Start');
+  start.resolve({ state: 'ready', videoOnly: true, playlist: ui.livePlaylist }); await flush();
+  assert.equal(ui.calls('/api/live/stop').length, 1);
+  assert.equal(ui.get('#live-video').playCalls, 0);
+  assert.equal(ui.get('#preview-toggle').disabled, true, 'Old cleanup must finish before the next Start');
+  stop.resolve({ state: 'stopped', videoOnly: true }); await flush();
+  assert.equal(ui.get('#preview-toggle').disabled, false);
+  assert.equal(ui.calls('/api/live/start').length, 1);
+  ui.click('#preview-toggle'); await flush();
+  assert.equal(ui.calls('/api/live/start').length, 2);
+});
+
+test('Stop aborts in-flight status and ignores a late ready response', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  const status = ui.defer('/api/live/status', { ignoreAbort: true });
+  ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  ui.click('#preview-toggle'); await flush();
+  assert.equal(status.request.options.signal.aborted, true);
+  status.resolve({ state: 'ready', videoOnly: true, playlist: ui.livePlaylist }); await flush(); await ui.clock.advance(30000);
+  assert.equal(ui.get('#live-video').hidden, true);
+  assert.equal(ui.get('#live-video').playCalls, 0);
+  assert.equal(ui.calls('/api/live/status').length, 1);
+  assert.equal(ui.calls('/api/live/keepalive').length, 0);
+});
+
+test('late cleanup uses its captured owner token and cannot expire a newly paired session', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  const start = ui.defer('/api/live/start', { ignoreAbort: true });
+  const stop = ui.defer('/api/live/stop');
+  ui.click('#preview-toggle'); await flush();
+  ui.get('#preview-dialog').close(); await flush();
+  ui.click('#pairing-button');
+  const pair = ui.defer('/api/pair');
+  ui.get('#pair-pin').value = '123456'; ui.get('#pair-form').dispatch('submit'); await flush();
+  pair.resolve({ token: 'new-session-token' }); await flush();
+  assert.equal(ui.get('#pair-dialog').open, false);
+  start.resolve({ state: 'ready', videoOnly: true, playlist: ui.livePlaylist }); await flush();
+  assert.equal(ui.calls('/api/live/stop')[0].options.headers.Authorization, 'Bearer unit-test-token');
+  stop.resolve({ error: 'session_expired' }, 401); await flush();
+  assert.equal(ui.get('#pair-dialog').open, false, 'Old cleanup must not log out the new session');
+  assert.equal(ui.get('#live-video').playCalls, 0);
+  ui.click('[data-key="home"]'); await flush();
+  assert.equal(ui.calls('/api/key')[0].options.headers.Authorization, 'Bearer new-session-token');
+});
+
+test('Live status failures clear video and do not retry or mislabel the whole Mac offline', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+  await ui.clock.advance(1200);
+  const status = ui.defer('/api/live/status');
+  await ui.clock.advance(5000);
+  status.resolve({ state: 'error', error: 'live_connection_lost', videoOnly: true }); await flush();
+  assert.equal(ui.get('#live-video').hidden, true);
+  assert.match(ui.get('#preview-state').textContent, /connection ended/);
+  assert.equal(ui.get('#mac-status').textContent, 'Available');
+  assert.equal(ui.calls('/api/live/stop').length, 1);
+  await ui.clock.advance(30000);
+  assert.equal(ui.calls('/api/live/start').length, 1);
+  assert.equal(ui.calls('/api/live/keepalive').length, 0);
+});
+
+test('expired Live authentication stops the stream and opens pairing without replay', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  const status = ui.defer('/api/live/status');
+  ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  status.resolve({ error: 'session_expired' }, 401); await flush();
+  assert.equal(ui.get('#pair-dialog').open, true);
+  assert.equal(ui.get('#preview-dialog').open, false);
+  assert.equal(ui.get('#live-video').hidden, true);
+  assert.equal(ui.calls('/api/live/stop').length, 1);
+  await ui.clock.advance(30000);
+  assert.equal(ui.calls('/api/live/start').length, 1);
+});
+
+test('invalid Live playlist paths cannot load remote media or leak tokens', async t => {
+  for (const playlist of ['https://example.com/live.m3u8', '/api/live/../index.m3u8', '/api/live/0123456789abcdef0123456789abcdef/index.m3u8?token=secret']) await t.test(playlist, async () => {
+    const ui = harness({ liveStart: { state: 'ready', videoOnly: true, playlist } }); await flush();
+    ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+    assert.equal(ui.get('#live-video').playCalls, 0);
+    assert.equal(ui.get('#live-video').src, '');
+    assert.equal(ui.calls('/api/live/stop').length, 1);
+    assert.match(ui.get('#preview-state').textContent, /invalid video session/);
+  });
+});
+
+test('a Stop timeout releases only the local barrier and never starts video automatically', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button'); ui.click('#preview-toggle'); await flush();
+  ui.defer('/api/live/stop'); ui.click('#preview-toggle'); await flush();
+  assert.equal(ui.get('#preview-toggle').disabled, true);
+  await ui.clock.advance(20000);
+  assert.equal(ui.get('#preview-toggle').disabled, false);
+  assert.equal(ui.get('#preview-toggle').textContent, 'Start live video');
+  assert.equal(ui.calls('/api/live/start').length, 1);
+  assert.equal(ui.get('#live-video').hidden, true);
+});
+
+test('Live D-pad controls work before playback and while paused; Escape only closes the sheet', async () => {
+  const ui = harness(); await flush(); ui.click('#preview-button');
+  ui.key('ArrowUp', ui.get('.preview-up')); await flush();
+  ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  ui.get('#live-video').pause(); ui.get('#live-video').dispatch('pause');
+  ui.key('ArrowDown', ui.get('.preview-down')); await flush();
+  assert.deepEqual(ui.calls('/api/key').map(request => request.body.key), ['up', 'down']);
+  ui.key('Escape', ui.get('#preview-toggle')); await flush();
+  assert.equal(ui.get('#preview-dialog').open, false);
+  assert.equal(ui.calls('/api/key').length, 2);
+  assert.equal(ui.calls('/api/live/stop').length, 1);
+});
+
+test('native and fatal HLS diagnostics include only their selected safe fields', async () => {
+  const native = harness(); await flush(); native.click('#preview-button'); native.click('#preview-toggle'); await flush();
+  await native.clock.advance(1200);
+  native.get('#live-video').error = { code: 4, message: 'Unsupported media', privateValue: 'do-not-log' };
+  native.get('#live-video').dispatch('error'); await flush();
+  assert.equal(native.warnings.length, 1);
+  assert.deepEqual(native.warnings[0], ['Nepal Remote: native video error', JSON.stringify({ code: 4, message: 'Unsupported media' })]);
+  const hls = harness({ nativeHls: false, hls: true }); await flush(); hls.click('#preview-button'); hls.click('#preview-toggle'); await flush();
+  await hls.clock.advance(1200);
+  hls.players[0].emit('error', { fatal: true, type: 'networkError', details: 'manifestLoadError',
+    response: { code: 401, url: 'private-media-url', data: 'private-data' }, token: 'private-token' });
+  await flush();
+  assert.equal(hls.warnings.length, 1);
+  assert.deepEqual(hls.warnings[0], ['Nepal Remote: fatal HLS error', JSON.stringify({ type: 'networkError', details: 'manifestLoadError', responseCode: 401 })]);
+  assert.equal(hls.players[0].destroyed, true);
 });

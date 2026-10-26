@@ -49,3 +49,9 @@ The phone remote reuses these same unmodified PNGs at `remote/dist/assets/netfli
 ## Weather service
 
 Current conditions and forecasts come from [Open-Meteo](https://open-meteo.com/), with attribution in both the remote and on-TV panels. See the provider’s [API documentation](https://open-meteo.com/en/docs) and [terms](https://open-meteo.com/en/terms). Requests go to the fixed HTTPS forecast endpoint. No Open-Meteo server or client-library source is vendored in this repository.
+
+## Local live-video player
+
+The companion includes the unmodified Hls.js 1.7.3 light distribution at `remote/dist/vendor/hls.light.min.js`, from the official [hls.js npm package](https://www.npmjs.com/package/hls.js/v/1.7.3) maintained by [video-dev/hls.js](https://github.com/video-dev/hls.js). Its [copyright notices](remote/dist/vendor/HLS-LICENSE.txt) and full [Apache License 2.0](remote/dist/vendor/APACHE-2.0.txt) are retained alongside it. The JavaScript SHA-256 is `0251332c00a216a35d7d6919044d60da82b78beb3bd50ac6c662ae74a2f5474b`. It is served by the local companion; the browser does not load a CDN player.
+
+Continuous video additionally uses a separately obtained [scrcpy 5.0.1 server](https://github.com/Genymobile/scrcpy/releases/tag/v5.0.1), distributed under Apache License 2.0, and an installed FFmpeg runtime. Neither executable is included in this repository. The optional [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) package can provide FFmpeg; its bundled binary retains FFmpeg's own license and build notices. Pillow for snapshot conversion is also installed separately and retains its own license.

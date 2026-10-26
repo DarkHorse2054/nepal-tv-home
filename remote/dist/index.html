@@ -13,6 +13,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/svg+xml" href="/assets/remote-icon.svg">
   <link rel="stylesheet" href="/styles.css">
+  <script src="/vendor/hls.light.min.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -105,7 +106,7 @@
       <button id="weather-button" class="tool-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-weather"/></svg><span>Weather</span></button>
       <button id="wallpaper-button" class="tool-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-wallpaper"/></svg><span>Wallpaper</span></button>
     </section>
-    <button id="preview-button" class="preview-launch" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-preview"/></svg><span>Screen preview</span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
+    <button id="preview-button" class="preview-launch" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-preview"/></svg><span>Live view</span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
     <footer class="page-footer">
       <button id="type-button" class="footer-key" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>Type on TV</button>
       <button id="settings-button" class="footer-key" type="button"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
@@ -114,11 +115,12 @@
   </main>
 
   <dialog id="preview-dialog" class="sheet preview-sheet" aria-labelledby="preview-title">
-    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">FIRE TV · NO AUDIO</p><h2 id="preview-title">Screen preview</h2></div><button class="close-button" data-close type="button" aria-label="Close screen preview"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">FIRE TV · NO AUDIO</p><h2 id="preview-title">Live view</h2></div><button class="close-button" data-close type="button" aria-label="Close live view"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
     <p id="preview-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <div class="view-modes" role="group" aria-label="Viewing mode"><button type="button" data-view-mode="video" aria-pressed="true">Live video</button><button type="button" data-view-mode="snapshots" aria-pressed="false">Snapshots</button></div>
     <p id="preview-state" class="tool-status" role="status">Ready when you are</p>
     <div class="preview-layout">
-      <div class="preview-view"><div class="preview-screen"><img id="preview-image" alt="Latest Fire TV screen capture" hidden><div id="preview-placeholder" class="preview-placeholder"><svg class="icon" aria-hidden="true"><use href="#i-preview"/></svg><span>Start to see your Fire TV</span></div></div><p id="preview-captured" class="tool-updated">No capture yet</p></div>
+      <div class="preview-view"><div class="preview-screen"><video id="live-video" muted playsinline controls preload="none" aria-label="Live Fire TV video" hidden></video><img id="preview-image" alt="Latest Fire TV screen capture" hidden><div id="preview-placeholder" class="preview-placeholder"><svg class="icon" aria-hidden="true"><use href="#i-preview"/></svg><span>Start to see your Fire TV</span></div></div><p id="preview-captured" class="tool-updated">No video yet</p><button id="live-play" class="secondary-button live-play" type="button" hidden>Play video</button></div>
       <div class="preview-controls">
         <div class="preview-pad" role="group" aria-label="Preview Fire TV navigation">
           <button class="preview-key preview-up" data-key="up" type="button" disabled aria-label="Preview up"><svg class="icon" aria-hidden="true"><use href="#i-up"/></svg></button>
@@ -130,8 +132,8 @@
         <div class="preview-nav"><button class="preview-key" data-key="back" type="button" disabled aria-label="Preview Back"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg><span>Back</span></button><button class="preview-key" data-key="home" type="button" disabled aria-label="Preview Home"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span>Home</span></button></div>
       </div>
     </div>
-    <button id="preview-toggle" class="primary-button" type="button" disabled>Start preview</button>
-    <p class="sheet-footnote">Images refresh every few seconds. Fire TV only; protected video may be blank. Keep your Mac awake.</p>
+    <button id="preview-toggle" class="primary-button" type="button" disabled>Start live video</button>
+    <p id="preview-footnote" class="sheet-footnote">Continuous video · no audio · a few seconds behind TV. Fire TV only; protected video may be blank. Keep your Mac awake.</p>
   </dialog>
 
   <dialog id="airplay-dialog" class="sheet" aria-labelledby="airplay-title">

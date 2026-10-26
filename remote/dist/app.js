@@ -43,6 +43,20 @@
     preview_dependency_missing: 'Screen preview needs Pillow on the Mac. See remote setup.',
     preview_invalid_image: 'Fire TV did not return a usable screen image. Try again.',
     preview_timeout: 'Screen capture took too long. Try again.',
+    live_busy: 'Live view is finishing. Try again in a moment.',
+    live_rate_limited: 'Give Fire TV a moment before starting live video again.',
+    live_in_use: 'Live view is open on another remote.',
+    live_not_owner: 'Start live view from this remote first.',
+    live_server_missing: 'Live video setup is incomplete on your Mac.',
+    live_server_invalid: 'The live video server needs to be checked on your Mac.',
+    live_dependency_missing: 'Live video needs FFmpeg and scrcpy on the Mac.',
+    live_start_timeout: 'Live video took too long to start. Try again.',
+    live_unavailable: 'Live video is unavailable. Reconnect Fire TV and try again.',
+    live_process_failed: 'Live video stopped. Try starting it again.',
+    live_connection_lost: 'The live video connection ended. Try again.',
+    live_buffer_limit: 'Live video could not keep up. Try again.',
+    live_invalid_media: 'Fire TV did not return playable video.',
+    live_not_found: 'The live video session ended. Start it again.',
   };
   const keyButtons = [...document.querySelectorAll('[data-key]')];
   const appButtons = [...document.querySelectorAll('[data-app]')];
@@ -96,6 +110,7 @@
     $('#type-button').disabled = !fireReady;
     $('#preview-button').disabled = !fireReady;
     if (!fireReady && (previewRunning || previewUrl)) stopPreview();
+    if (!fireReady && liveSession) stopLive('Live view stopped');
     renderPreviewState();
     $('#sources-button').disabled = !token || !serverAvailable || !samsungEnabled;
     $('#samsung-pair').disabled = !token || !serverAvailable || samsungBusy;
@@ -183,7 +198,7 @@
   function openSheet(sheet) {
     invalidateCommands();
     clearToast();
-    if (sheet.id !== 'preview-dialog') stopPreview();
+    if (sheet.id !== 'preview-dialog') { stopPreview(); stopLive(); }
     for (const other of sheets) if (other !== sheet && other.open) other.close();
     if (!sheet.open) sheet.showModal();
   }
@@ -195,13 +210,17 @@
   async function api(path, options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 8000);
+    const cancel = () => controller.abort();
+    if (options.signal?.aborted) cancel();
+    else options.signal?.addEventListener('abort', cancel, { once: true });
     const headers = { Accept: 'application/json' };
-    const requestToken = token;
+    const requestToken = options.sessionToken ?? token;
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
-    if (options.auth !== false && token) headers.Authorization = `Bearer ${token}`;
+    if (options.auth !== false && requestToken) headers.Authorization = `Bearer ${requestToken}`;
     try {
       const response = await fetch(path, {
         method: options.method || 'GET', headers, cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
+        keepalive: options.keepalive === true,
         ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
       });
       serverAvailable = true;
@@ -210,7 +229,7 @@
         const error = new Error(ERROR_MESSAGES[data.error] || 'The remote could not complete that request.');
         error.status = response.status;
         error.code = data.error;
-        if (response.status === 401 && options.auth !== false && token === requestToken) {
+        if (response.status === 401 && options.auth !== false && options.expireSession !== false && token === requestToken) {
           saveToken(''); online = false; samsungPaired = false; invalidateCommands(); renderState();
           openPairing('Your session ended. Enter the code shown on your Mac.');
         }
@@ -220,7 +239,7 @@
     } catch (error) {
       if (!error.status && options.probe === true) { serverAvailable = false; online = false; invalidateCommands(); renderState(); }
       throw error;
-    } finally { clearTimeout(timeout); }
+    } finally { clearTimeout(timeout); options.signal?.removeEventListener('abort', cancel); }
   }
   async function refreshStatus() {
     if (!token || statusRequest || document.hidden) return statusRequest;
@@ -440,6 +459,10 @@
   const wallpaperModes = ['auto', 'morning', 'dusk', 'night'];
   const wallpaperButtons = [...document.querySelectorAll('[data-wallpaper]')];
 
+  let previewMode = 'video';
+  let liveSession = null;
+  const viewModeButtons = [...document.querySelectorAll('[data-view-mode]')];
+  const liveVideo = $('#live-video');
   let previewRunning = false;
   let previewIntent = 0;
   let previewTimer = null;
@@ -447,14 +470,21 @@
   let previewUrl = '';
   const PREVIEW_MAX_BYTES = 1024 * 1024;
   function renderPreviewState() {
-    $('#preview-toggle').textContent = previewRunning ? 'Stop preview' : 'Start preview';
-    $('#preview-toggle').disabled = !previewRunning && (!token || !online || !serverAvailable || document.hidden);
+    const video = previewMode === 'video';
+    for (const button of viewModeButtons) button.setAttribute('aria-pressed', String(button.dataset.viewMode === previewMode));
+    $('#preview-toggle').textContent = liveSession?.stopping ? 'Stopping…' : video
+      ? liveSession ? 'Stop live view' : 'Start live video'
+      : previewRunning ? 'Stop preview' : 'Start preview';
+    $('#preview-toggle').disabled = Boolean(liveSession?.stopping || (!liveSession && !previewRunning && (!token || !online || !serverAvailable || document.hidden)) || (!video && liveSession));
+    $('#preview-footnote').textContent = video
+      ? 'Continuous video · no audio · a few seconds behind TV. Fire TV only; protected video may be blank. Keep your Mac awake.'
+      : 'Images refresh every few seconds. Fire TV only; protected video may be blank. Keep your Mac awake.';
   }
   function clearPreviewImage() {
     $('#preview-image').hidden = true;
     $('#preview-image').removeAttribute('src');
     $('#preview-placeholder').hidden = false;
-    $('#preview-captured').textContent = 'No capture yet';
+    $('#preview-captured').textContent = previewMode === 'video' ? 'No video yet' : 'No capture yet';
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     previewUrl = '';
   }
@@ -470,12 +500,12 @@
     renderPreviewState();
   }
   async function refreshPreview() {
-    if (!previewRunning || previewController || !token || !online || !serverAvailable || document.hidden || !$('#preview-dialog').open) return;
+    if (previewMode !== 'snapshots' || !previewRunning || previewController || !token || !online || !serverAvailable || document.hidden || !$('#preview-dialog').open) return;
     const intent = previewIntent;
     const requestToken = token;
     const controller = new AbortController();
     previewController = controller;
-    const current = () => intent === previewIntent && token === requestToken && previewRunning && !document.hidden && $('#preview-dialog').open;
+    const current = () => previewMode === 'snapshots' && intent === previewIntent && token === requestToken && previewRunning && !document.hidden && $('#preview-dialog').open;
     const deadline = setTimeout(() => controller.abort(), 26000);
     if (!previewUrl) $('#preview-state').textContent = 'Capturing Fire TV…';
     try {
@@ -527,11 +557,191 @@
       if (current()) previewTimer = setTimeout(refreshPreview, 3000);
     }
   }
+  function liveCurrent(session) {
+    return liveSession === session && !session.stopping && previewMode === 'video'
+      && token === session.token && online && serverAvailable && !document.hidden && $('#preview-dialog').open;
+  }
+  function clearLivePlayer(session) {
+    for (const [event, listener] of session.listeners || []) liveVideo.removeEventListener(event, listener);
+    session.listeners = [];
+    if (session.hls) { session.hls.destroy(); session.hls = null; }
+    liveVideo.pause();
+    liveVideo.removeAttribute('src');
+    liveVideo.load();
+    liveVideo.hidden = true;
+    $('#live-play').hidden = true;
+    $('#preview-placeholder').hidden = false;
+    session.playlist = '';
+  }
+  function stopLive(message = 'Live view stopped') {
+    const session = liveSession;
+    if (!session) return Promise.resolve();
+    if (session.stopping) return session.stopPromise;
+    session.stopping = true;
+    clearTimeout(session.pollTimer);
+    clearTimeout(session.keepaliveTimer);
+    session.statusController?.abort();
+    session.keepaliveController?.abort();
+    clearLivePlayer(session);
+    $('#preview-state').textContent = message;
+    $('#preview-captured').textContent = previewMode === 'video' ? 'No video yet' : 'No capture yet';
+    renderPreviewState();
+    // A start may have reached the Mac after this tab closed. Wait for it before
+    // sending its owned stop; keep Start disabled until that stop finishes.
+    session.stopPromise = (async () => {
+      try { await session.startPromise; } catch { /* Stop also covers an uncertain start acknowledgement. */ }
+      try {
+        await api('/api/live/stop', { method: 'POST', body: {}, sessionToken: session.token,
+          timeoutMs: 20000, keepalive: true, expireSession: false });
+      } catch { /* The server's owner lease also expires without keepalives. */ }
+      finally {
+        if (liveSession === session) { liveSession = null; renderPreviewState(); }
+      }
+    })();
+    return session.stopPromise;
+  }
+  async function playLive(session) {
+    if (!liveCurrent(session) || !session.playlist) return;
+    try { await liveVideo.play(); }
+    catch {
+      if (!liveCurrent(session)) return;
+      $('#live-play').hidden = false;
+      $('#preview-state').textContent = 'Tap Play to start video.';
+    }
+  }
+  function attachLivePlayer(session, playlist) {
+    if (!liveCurrent(session) || session.playlist === playlist) return;
+    if (session.playlist) { stopLive('The video session changed. Start again.'); return; }
+    session.playlist = playlist;
+    clearPreviewImage();
+    liveVideo.hidden = false;
+    $('#preview-placeholder').hidden = true;
+    $('#preview-state').textContent = 'Connecting video…';
+    $('#preview-captured').textContent = 'Continuous stream · no audio';
+    function listen(event, listener) { liveVideo.addEventListener(event, listener); session.listeners.push([event, listener]); }
+    listen('playing', () => {
+      if (!liveCurrent(session) || liveVideo.paused || liveVideo.readyState < 2) return;
+      session.playing = true;
+      $('#preview-state').textContent = 'Live video playing · no audio';
+      $('#live-play').hidden = true;
+    });
+    for (const event of ['waiting', 'stalled']) listen(event, () => {
+      if (liveCurrent(session)) { session.playing = false; $('#preview-state').textContent = 'Buffering video…'; }
+    });
+    listen('pause', () => {
+      if (liveCurrent(session)) { session.playing = false; $('#preview-state').textContent = 'Video paused'; $('#live-play').hidden = false; }
+    });
+    listen('error', () => {
+      if (!liveCurrent(session)) return;
+      console.warn('Nepal Remote: native video error', JSON.stringify({
+        code: liveVideo.error?.code ?? null,
+        message: typeof liveVideo.error?.message === 'string' ? liveVideo.error.message.slice(0, 200) : '',
+      }));
+      stopLive('Video could not play. Try starting again.');
+    });
+    if (window.Hls?.isSupported()) {
+      const hls = new window.Hls({ enableWorker: false, lowLatencyMode: false, liveSyncDurationCount: 3, maxBufferLength: 6 });
+      session.hls = hls;
+      hls.on(window.Hls.Events.MANIFEST_PARSED, () => { if (liveCurrent(session)) playLive(session); });
+      hls.on(window.Hls.Events.ERROR, (_event, data) => {
+        if (!liveCurrent(session) || !data?.fatal) return;
+        console.warn('Nepal Remote: fatal HLS error', JSON.stringify({
+          type: data.type, details: data.details, responseCode: data.response?.code ?? null,
+        }));
+        stopLive('Video could not play. Try starting again.');
+      });
+      hls.attachMedia(liveVideo);
+      hls.loadSource(playlist);
+    } else if (liveVideo.canPlayType('application/vnd.apple.mpegurl')) {
+      liveVideo.src = playlist;
+      liveVideo.load();
+      playLive(session);
+    } else stopLive('Live video is not supported in this browser. Try Safari or Chrome.');
+  }
+  function applyLiveState(session, data) {
+    if (!liveCurrent(session)) return;
+    if (!['starting', 'ready', 'stopped', 'error'].includes(data?.state)) {
+      stopLive('The Mac returned an invalid video session. Try again.'); return;
+    }
+    session.state = data.state;
+    if (data.state === 'error' || data.state === 'stopped') {
+      stopLive(ERROR_MESSAGES[data.error] || (data.state === 'error' ? 'Live video stopped. Try again.' : 'Live view stopped')); return;
+    }
+    if (data.state === 'ready') {
+      if (data.videoOnly !== true || typeof data.playlist !== 'string' || !/^\/api\/live\/[a-f0-9]{32}\/index\.m3u8$/.test(data.playlist)) {
+        stopLive('The Mac returned an invalid video session. Try again.'); return;
+      }
+      attachLivePlayer(session, data.playlist);
+    } else if (!session.playlist) $('#preview-state').textContent = 'Starting live video…';
+  }
+  async function pollLive(session) {
+    if (!liveCurrent(session)) return;
+    const controller = new AbortController();
+    session.statusController = controller;
+    try {
+      const data = await api('/api/live/status', { sessionToken: session.token, signal: controller.signal });
+      if (liveCurrent(session)) applyLiveState(session, data);
+    } catch (error) {
+      if (liveCurrent(session)) stopLive(error.status ? error.message : 'The live video connection ended. Try again.');
+    } finally {
+      if (session.statusController === controller) session.statusController = null;
+      if (liveCurrent(session)) session.pollTimer = setTimeout(() => pollLive(session), session.state === 'ready' ? 5000 : 1200);
+    }
+  }
+  async function keepLive(session) {
+    if (!liveCurrent(session)) return;
+    const controller = new AbortController();
+    session.keepaliveController = controller;
+    try {
+      const data = await api('/api/live/keepalive', { method: 'POST', body: {}, sessionToken: session.token, signal: controller.signal });
+      if (liveCurrent(session)) applyLiveState(session, data);
+    } catch (error) {
+      if (liveCurrent(session)) stopLive(error.status ? error.message : 'The live video connection ended. Try again.');
+    } finally {
+      if (session.keepaliveController === controller) session.keepaliveController = null;
+      if (liveCurrent(session)) session.keepaliveTimer = setTimeout(() => keepLive(session), 10000);
+    }
+  }
+  async function startLive() {
+    if (liveSession || previewMode !== 'video' || !token || !online || !serverAvailable || document.hidden || !$('#preview-dialog').open) return;
+    const session = { token, stopping: false, state: 'starting', playlist: '', listeners: [], playing: false };
+    liveSession = session;
+    $('#preview-state').textContent = 'Starting live video…';
+    renderPreviewState();
+    session.startPromise = api('/api/live/start', { method: 'POST', body: {}, sessionToken: session.token, timeoutMs: 12000 });
+    try {
+      const data = await session.startPromise;
+      if (!liveCurrent(session)) return;
+      applyLiveState(session, data);
+      if (liveCurrent(session)) {
+        session.pollTimer = setTimeout(() => pollLive(session), session.state === 'ready' ? 5000 : 1200);
+        session.keepaliveTimer = setTimeout(() => keepLive(session), 10000);
+      }
+    } catch (error) {
+      if (liveCurrent(session)) stopLive(error.status ? error.message : 'Live video could not start. Try again.');
+    }
+  }
+  for (const button of viewModeButtons) button.addEventListener('click', () => {
+    if (button.dataset.viewMode === previewMode) return;
+    stopPreview();
+    stopLive('Ready when you are');
+    previewMode = button.dataset.viewMode;
+    clearPreviewImage();
+    $('#preview-state').textContent = 'Ready when you are';
+    renderPreviewState();
+  });
+  $('#live-play').addEventListener('click', () => { if (liveSession) playLive(liveSession); });
   $('#preview-button').addEventListener('click', () => {
     stopPreview(true, 'Ready when you are');
+    stopLive('Ready when you are');
+    previewMode = 'video';
+    clearPreviewImage();
+    renderPreviewState();
     openSheet($('#preview-dialog'));
   });
   $('#preview-toggle').addEventListener('click', () => {
+    if (previewMode === 'video') { if (liveSession) stopLive(); else startLive(); return; }
+    if (liveSession) return;
     if (previewRunning) { stopPreview(false, 'Preview paused · last capture'); return; }
     if (!token || !online || !serverAvailable || document.hidden) return;
     previewRunning = true;
@@ -541,9 +751,9 @@
     refreshPreview();
   });
   $('#preview-image').addEventListener('error', () => { if (previewUrl) stopPreview(true, ERROR_MESSAGES.preview_invalid_image); });
-  $('#preview-dialog').addEventListener('close', () => { if (!$('#preview-dialog').open) stopPreview(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) stopPreview(); else renderPreviewState(); });
-  window.addEventListener('pagehide', () => stopPreview());
+  $('#preview-dialog').addEventListener('close', () => { if (!$('#preview-dialog').open) { stopPreview(); stopLive(); } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { stopPreview(); stopLive(); } else renderPreviewState(); });
+  window.addEventListener('pagehide', () => { stopPreview(); stopLive(); });
 
   function featureReady() { return Boolean(token && serverAvailable); }
   function renderToolsState() {

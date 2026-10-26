@@ -4,7 +4,7 @@ The UI/UX Pro Max redesign uses a warm charcoal Himalayan theme, a sculpted glas
 
 The companion server supports macOS/Linux with POSIX private-file checks; a phone or browser on any platform can use it on the same LAN. Keep the computer awake, the Fire TV powered, and ADB authorized. This repository does not include personal addresses, saved authorizations, or a configured TV.
 
-The phone interface includes a compact glass directional pad, navigation/playback keys, six app shortcuts and sheets for typing, Samsung Sources and connection settings. It distinguishes an unavailable Mac, an offline Fire TV and an expired pairing session. Reconnect checks the configured target without replaying commands. On especially narrow screens, app shortcuts use two rows to preserve touch targets.
+The phone interface includes a compact glass directional pad, navigation/playback keys, six app shortcuts and sheets for typing, Samsung Sources, Live view and connection settings. Live view offers continuous video or separate refreshed snapshots, each started explicitly. It distinguishes an unavailable Mac, an offline Fire TV and an expired pairing session. Reconnect checks the configured target without replaying commands. On especially narrow screens, app shortcuts use two rows to preserve touch targets.
 
 ## Configure before starting
 
@@ -101,7 +101,11 @@ Every POST requires same-origin Origin, JSON and the paired webpage bearer token
 | POST /api/app | `{"app":"paramount"}` | Launch one fixed known app component |
 | POST /api/text | `{"text":"Kathmandu"}` | Send bounded text once to the selected field |
 | POST /api/reconnect | `{}` | Check the configured Fire TV; returns `{ok:true,online:boolean}` |
-| POST /api/preview/frame | `{}` | One bounded JPEG screen capture; explicit Start in the phone sheet |
+| POST /api/live/start | `{}` | Start one owned, leased continuous-video producer |
+| GET /api/live/status | none | Read the paired session's video state; does not start or renew it |
+| POST /api/live/keepalive | `{}` | Renew the active owner's video lease |
+| POST /api/live/stop | `{}` | Stop the owner's producer and remove its rolling video buffer |
+| POST /api/preview/frame | `{}` | One bounded JPEG capture in Snapshots mode |
 | POST /api/samsung/pair | `{}` | Explicit bounded Samsung approval request |
 | POST /api/samsung/key | `{"key":"source"}` | One allowlisted Samsung panel/navigation/test click |
 
@@ -117,21 +121,60 @@ Home sends native Android key code 3. This remote does not change the default la
 
 Date status includes `localDate`, `localTime`, `localLabel`, `secondaryDate`, `secondaryTime` and `secondaryLabel`. The historical `sanMateo`, `nepal` and `kathmanduTime` fields remain aliases for existing frontend compatibility; they use your configured zones. The bundled BS calendar ends at BS 2083 and falls back to Gregorian beyond its table. Its license is retained in `data/NEPALI-CALENDAR-LICENSE.txt`.
 
-## Screen preview
+## Live view
 
-Choose **Screen preview** below the Tools row, then **Start preview**. Opening the sheet does not capture anything. It shows refreshed screenshots of the Fire TV, with a D-pad, Back and Home inside the sheet. Requests run one at a time; the next starts three seconds after the previous request finishes, so capture time adds to that interval. The displayed time marks the start of the capture attempt, alongside its transfer latency. This preview refreshes still images and has no audio.
+Choose **Live view** below the Tools row. The sheet defaults to **Live video**; opening it does not start a producer or capture the screen. Select **Start live video** to receive a continuous H.264 stream from the configured Fire TV through the companion computer. The video and D-pad, Back and Home remain together. Navigation also works before playback and while the player is paused.
+
+The tested API 25 Fire TV provides **video only, without audio**. Expect a delay of several seconds rather than an instant remote monitor. Keep the companion computer awake, the Fire TV reachable and ADB authorized. Live view shows the **Fire TV stick's output only**. Samsung apps, Samsung's native AirPlay receiver and other HDMI sources are outside it; protected video and secure windows may be blank.
+
+The player waits for a ready stream and reports Playing only after the browser's actual playback event. Buffering remains explicit. If autoplay is refused, use **Play video** or the video's native controls. The locally bundled hls.js 1.7.3 player is preferred when MSE/Managed Media Source is supported, including compatible Safari versions. Native HLS is the fallback on browsers such as older iOS Safari. No CDN is required.
+
+**Stop live view**, closing or switching sheets, changing to Snapshots, hiding/leaving the page, disconnecting or ending the session stops the owned producer and clears the player. Start never resumes automatically. A pending Start is followed by its own Stop before the interface permits a new Start. The companion has a thirty-second owner lease, renewed every ten seconds only by an active, visible viewer, and a fifteen-minute maximum session. If a browser disappears before Stop can arrive, the lease expires and cleanup follows.
+
+### Optional video setup
+
+Remote controls and Snapshots do not require the live-video tools. For continuous video, install the pinned official scrcpy 5.0.1 server explicitly:
+
+```sh
+python3 remote/setup_live_tools.py --download
+```
+
+The helper downloads the official release, verifies its pinned SHA-256 and stores it privately at `remote/state/tools/scrcpy-server-v5.0.1`. The running companion never downloads a tool automatically. Keep this file and all other `state/` contents out of Git and public archives. Use `--scrcpy-server /absolute/path/scrcpy-server-v5.0.1` to select another copy of that same verified version.
+
+Live video also needs an FFmpeg executable with `libx264` encoding. Use an existing `ffmpeg` on PATH, pass `--ffmpeg /absolute/path/ffmpeg`, or install the optional bundled executable into the same Python environment that runs the companion:
+
+```sh
+python3 -m pip install imageio-ffmpeg
+./remote/start.sh
+# Explicit tool locations are also supported:
+./remote/start.sh --scrcpy-server /absolute/path/scrcpy-server-v5.0.1 --ffmpeg /absolute/path/ffmpeg
+```
+
+The server starts scrcpy through the authorized ADB shell, without root or installing a persistent Android application. It receives H.264 over a local ADB tunnel. Local FFmpeg decodes bounded 1280 × 720 YUV frames; the relay retains only the latest frame and feeds a second FFmpeg process at twenty frames per second. Repeating the last decoded frame keeps a still Home screen live without requesting screenshots. The encoder creates one-second HLS segments in a five-entry rolling playlist. Temporary directories are private and media files use mode `0600`; Stop/expiry removes the owned processes, tunnel, device-side temporary server and video buffer. This is a temporary playback buffer rather than a saved recording. Snapshot frames remain memory-only as described below.
+
+### Video authorization and verification
+
+The four `/api/live/` control routes use the existing paired bearer session; POST bodies must be exactly `{}` and satisfy the same Host/Origin checks. Responses report `starting`, `ready`, `stopped` or `error`, `videoOnly:true`, and a relative playlist path while active. Status reads do not renew the lease. Only the owner can stop or renew its stream; no arbitrary device, executable argument, media URL or output path is accepted through the API.
+
+Playlist and segment requests use an HttpOnly, same-origin cookie scoped to that live session. They are not public static files, and bearer tokens never appear in media URLs. Ordinary status polling and media reads do not start a producer. The existing trusted-LAN HTTP requirements still apply.
+
+Actual H.264 capture and continuous 1280 × 720 browser playback have been verified on the tested AFTMM using the local Hls.js player. A moving local TV page, advancing playback beyond one minute, Home and D-pad navigation, phone-width layouts and complete Stop cleanup were checked. A twelve-second observation advanced the playback timeline by 12.1 seconds. Native iPhone/Safari playback and protected-service playback remain unverified; end-to-end delay has not been precisely measured. Automated checks cover authorization, bounded media, leases, cleanup, player lifecycle and stale responses.
+
+### Snapshots
+
+Within **Live view**, choose **Snapshots → Start preview**. Selecting the mode alone does not capture anything. It shows refreshed screenshots of the Fire TV, with the same D-pad, Back and Home inside the sheet. Requests run one at a time; the next starts three seconds after the previous request finishes, so capture time adds to that interval. The displayed time marks the start of the capture attempt, alongside its transfer latency. This mode refreshes still images and has no audio.
 
 **Stop preview** pauses updates and retains the last image, labeled as paused. Closing the sheet, opening another sheet, hiding/leaving the page, losing the connection or ending the session stops requests and clears the image. Starting again is explicit. A request already accepted by the server may finish within its bounded deadline after the browser cancels; there is no continuing recorder or server-side capture loop.
 
 Preview requires the companion computer to stay awake, Fire TV to be reachable, and its existing ADB authorization to remain valid. It captures the **Fire TV stick's output only**: Samsung apps, Samsung's native AirPlay receiver and other HDMI sources are outside it. Protected video or secure windows may be blank. Images can include visible messages, account details or other screen content; only start preview when you intend to view that screen.
 
-Preview additionally needs [Pillow](https://pillow.readthedocs.io/en/stable/installation/basic-installation.html) in the Python environment that runs the companion:
+Snapshots additionally needs [Pillow](https://pillow.readthedocs.io/en/stable/installation/basic-installation.html) in the Python environment that runs the companion:
 
 ```sh
 python3 -m pip install --upgrade Pillow
 ```
 
-Use that environment's Python executable if it differs from `python3`. Pillow is optional: without it, pairing, remote controls and the other tools still work, while preview reports `preview_dependency_missing`.
+Use that environment's Python executable if it differs from `python3`. Pillow is optional: without it, pairing, remote controls and the other tools still work, while Snapshots reports `preview_dependency_missing`. Continuous video uses its separate FFmpeg/scrcpy tools.
 
 Each frame is an authenticated same-origin `POST /api/preview/frame` with the exact JSON body `{}` and the existing bearer session header. GET and HEAD never capture. The response is `image/jpeg` with `Cache-Control: no-store`, `X-Preview-Captured-At` in UTC and `X-Preview-Capture-Ms`. Session tokens stay in headers, never image URLs. No capture is triggered by ordinary status polling.
 

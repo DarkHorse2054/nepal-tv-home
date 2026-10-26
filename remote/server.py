@@ -47,6 +47,16 @@ def load_screen_preview():
 PREVIEW = load_screen_preview()
 
 
+def load_live_video():
+    spec = importlib.util.spec_from_file_location("nepal_live_video", HERE / "live_video.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+LIVE = load_live_video()
+
+
 def load_local_config():
     spec = importlib.util.spec_from_file_location("portable_remote_config", HERE / "config.py")
     module = importlib.util.module_from_spec(spec)
@@ -76,7 +86,7 @@ MONTHS = ("Baisakh", "Jestha", "Ashadh", "Shrawan", "Bhadra", "Ashwin",
           "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
        "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; "
-       "manifest-src 'self'; base-uri 'none'; form-action 'self'; "
+       "media-src 'self' blob:; manifest-src 'self'; base-uri 'none'; form-action 'self'; "
        "frame-ancestors 'none'; object-src 'none'")
 
 
@@ -188,6 +198,13 @@ class Pairing:
         raise ApiError(401, "session_expired")
 
 
+    def active(self, token_id):
+        if not isinstance(token_id, str) or not re.fullmatch(r"[a-f0-9]{64}", token_id, re.ASCII):
+            return False
+        with self.lock:
+            return self.tokens.get(bytes.fromhex(token_id), 0) > self.clock()
+
+
 class AdbBridge:
     """One configured TV, allowlisted actions, and bounded, remote-shell-quoted text."""
     def __init__(self, adb, fire_tv, runner=subprocess.run, clock=time.monotonic):
@@ -292,6 +309,17 @@ class AdbBridge:
                 return True, memory if memory_status == 0 else None, storage if storage_status == 0 else None
             except ApiError:
                 return False, None, None
+        finally:
+            self.command_lock.release()
+
+    def live_identity(self):
+        # A status probe can overlap Start. Wait briefly without holding the
+        # lock, then still verify this exact device before starting capture.
+        if not self.command_lock.acquire(timeout=3):
+            raise ApiError(429, "live_busy")
+        try:
+            if not self._probe(reconnect=False):
+                raise ApiError(503, "tv_unavailable")
         finally:
             self.command_lock.release()
 
@@ -493,7 +521,7 @@ class SamsungBridge:
 
 
 class RemoteApp:
-    def __init__(self, bridge, hosts, port, dist=HERE / "dist", pairing=None, samsung=None, config=None, device=None, weather=None, preview=None):
+    def __init__(self, bridge, hosts, port, dist=HERE / "dist", pairing=None, samsung=None, config=None, device=None, weather=None, preview=None, live=None, live_jar=None, ffmpeg=None):
         self.bridge, self.hosts, self.port = bridge, set(hosts), port
         self.dist = Path(dist).resolve()
         self.pairing = pairing or Pairing()
@@ -503,7 +531,13 @@ class RemoteApp:
         self.status_rate = WindowLimiter(60, 60)
         self.feature_rate = WindowLimiter(30, 60)
         self.preview_rate = WindowLimiter(20, 60)
+        self.capture_mode_lock = threading.Lock()
+        self.live_start_rate = WindowLimiter(3, 60)
         self.preview = preview if preview is not None else PREVIEW.ScreenPreview(lambda: self.bridge.capture_screen_png())
+        import os
+        self.live = live if live is not None else LIVE.LiveVideo(
+            getattr(self.bridge, "adb", "adb"), self.config["fire_tv"]["host"] + ":5555", live_jar or (HERE / "state/tools/scrcpy-server-v5.0.1"),
+            dict(os.environ), lambda: self.bridge.live_identity(), self.pairing.active, ffmpeg=ffmpeg)
         self.device = device if device is not None else FEATURES.DeviceSamples(lambda: self.bridge.device_readings())
         self.weather = weather if weather is not None else FEATURES.WeatherForecast(
             self.config.get("weather"), self.config["clocks"]["local_timezone"])
@@ -587,17 +621,44 @@ class RemoteApp:
 
 
     def preview_frame(self, token_id):
-        if not self.preview_rate.allow(token_id):
-            raise ApiError(429, "preview_rate_limited")
+        if not self.capture_mode_lock.acquire(blocking=False):
+            raise ApiError(429, "preview_busy")
         try:
-            return self.preview.frame()
-        except PREVIEW.PreviewError as error:
-            raise ApiError(error.status, error.code) from None
+            if self.live.active():
+                raise ApiError(409, "live_in_use")
+            if not self.preview_rate.allow(token_id):
+                raise ApiError(429, "preview_rate_limited")
+            try:
+                return self.preview.frame()
+            except PREVIEW.PreviewError as error:
+                raise ApiError(error.status, error.code) from None
+        finally:
+            self.capture_mode_lock.release()
 
     def get_feature(self, name, token_id):
         if not self.feature_rate.allow(token_id):
             raise ApiError(429, "feature_rate_limited")
         return (self.device if name == "device" else self.weather).status()
+
+
+    def live_call(self, action, token_id):
+        admitted = False
+        if action == "start":
+            if not self.live_start_rate.allow(token_id):
+                raise ApiError(429, "live_rate_limited")
+            admitted = self.capture_mode_lock.acquire(blocking=False)
+            if not admitted:
+                raise ApiError(409, "preview_busy")
+        try:
+            return getattr(self.live, action)(token_id)
+        except LIVE.LiveError as error:
+            raise ApiError(error.status, error.code) from None
+        finally:
+            if admitted:
+                self.capture_mode_lock.release()
+
+    def close(self):
+        self.live.close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -647,8 +708,29 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urlsplit(self.path)
             if parsed.query or parsed.fragment:
                 raise ApiError(404, "not_found")
+            media = re.fullmatch(r"/api/live/([a-f0-9]{32})/(index\.m3u8|part[0-9]{6}\.ts)", parsed.path, re.ASCII)
+            if method in ("GET", "HEAD") and media:
+                if self.headers.get("Sec-Fetch-Site") not in (None, "same-origin", "none"):
+                    raise ApiError(403, "cross_origin_forbidden")
+                referer = self.headers.get("Referer")
+                if referer:
+                    try:
+                        ref = urlsplit(referer)
+                        if ref.scheme != "http" or app.authority(ref.netloc) != app.authority(self.headers.get("Host")):
+                            raise ValueError()
+                    except (ValueError, ApiError):
+                        raise ApiError(403, "cross_origin_forbidden") from None
+                try:
+                    result = app.live.media(media[1], media[2], LIVE.cookie_value(self.headers), self.headers.get("Range"))
+                except LIVE.LiveError as error:
+                    raise ApiError(error.status, error.code) from None
+                self.respond(*result[:3], head=method == "HEAD", extra_headers=result[3])
+                return
             if method in ("GET", "HEAD"):
-                if parsed.path == "/api/status":
+                if parsed.path == "/api/live/status":
+                    token = app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
+                    self.respond(200, app.live.status(token), head=method == "HEAD")
+                elif parsed.path == "/api/status":
                     token = app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
                     self.respond(200, app.get_status(token), head=method == "HEAD")
                 elif parsed.path in ("/api/device", "/api/weather"):
@@ -660,7 +742,7 @@ class Handler(BaseHTTPRequestHandler):
                     body, mime = app.static(parsed.path)
                     self.respond(200, body, mime, head=method == "HEAD")
                 return
-            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", "/api/text", "/api/reconnect", "/api/wallpaper", "/api/preview/frame", *SAMSUNG_PATHS):
+            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", "/api/text", "/api/reconnect", "/api/wallpaper", "/api/preview/frame", "/api/live/start", "/api/live/keepalive", "/api/live/stop", *SAMSUNG_PATHS):
                 raise ApiError(405, "method_not_allowed")
             if parsed.path != "/api/pair":
                 token_id = app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
@@ -673,6 +755,12 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json_object)
             except (ValueError, UnicodeError):
                 raise ApiError(400, "invalid_json")
+            if parsed.path in ("/api/live/start", "/api/live/keepalive", "/api/live/stop"):
+                if not isinstance(payload, dict) or payload:
+                    raise ApiError(400, "invalid_payload")
+                result, cookie = app.live_call(parsed.path.rsplit("/", 1)[1], token_id)
+                self.respond(200, result, extra_headers=(("Set-Cookie", cookie),) if cookie else ())
+                return
             if parsed.path == "/api/preview/frame":
                 if not isinstance(payload, dict) or payload:
                     raise ApiError(400, "invalid_payload")
@@ -803,6 +891,8 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--allow-host", action="append", default=[], help="Extra local Host/IP, never a wildcard")
     parser.add_argument("--adb", type=Path, help="ADB executable (default: adb on PATH)")
+    parser.add_argument("--scrcpy-server", type=Path, help="Optional verified scrcpy 5.0.1 server JAR")
+    parser.add_argument("--ffmpeg", type=Path, help="Optional FFmpeg executable for live video")
     args = parser.parse_args()
     try:
         configuration = CONFIG.load(args.config)
@@ -816,7 +906,11 @@ def main():
         parser.error("ADB was not found. Install Android Platform Tools or supply --adb /absolute/path/to/adb")
     hosts = local_hosts(configuration["fire_tv"]["host"], args.allow_host)
     bridge = AdbBridge(adb, configuration["fire_tv"])
-    app = RemoteApp(bridge, hosts, args.port, config=configuration)
+    app = RemoteApp(bridge, hosts, args.port, config=configuration, live_jar=args.scrcpy_server, ffmpeg=args.ffmpeg)
+    import signal
+    def terminate_server(_signal, _frame):
+        raise KeyboardInterrupt()
+    previous_term = signal.signal(signal.SIGTERM, terminate_server)
     with RemoteServer((args.bind, args.port), app) as server:
         print(configuration["fire_tv"]["name"] + " remote", flush=True)
         for host in sorted(hosts):
@@ -829,6 +923,9 @@ def main():
             server.serve_forever(poll_interval=0.5)
         except KeyboardInterrupt:
             pass
+        finally:
+            app.close()
+            signal.signal(signal.SIGTERM, previous_term)
 
 
 if __name__ == "__main__":

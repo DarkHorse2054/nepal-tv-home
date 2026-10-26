@@ -26,9 +26,23 @@ A compact Tools row opens native browser dialogs without enlarging the curated s
 
 AirPlay is a fourth Tools entry with an original stroke icon and a local guide sheet. The row uses four vertical icon/label targets at widths of 360px and above, and a two-by-two grid below 360px. The guide remains available unpaired and offline, issues no API request and makes no live connection claim. It explains native Samsung casting separately from the Mac-hosted remote.
 
-## Screen preview
+## Live view
 
-Keep Screen preview as a separate full-width action below the four-item Tools row. Opening its sheet is passive; Start preview is the explicit capture action. The image, its capture time and a compact D-pad with Back/Home stay together, with a side-by-side layout where space permits. Use the existing stroke icons, touch targets and native-dialog focus behavior. Describe refreshed screenshots and no audio without suggesting smooth video, Samsung screen capture or protected playback.
+Keep Live view as a separate full-width action below the four-item Tools row. Its sheet offers two clearly named modes: **Live video**, selected initially, and **Snapshots**. Opening the sheet or selecting a mode is passive. Each mode requires its own explicit Start. Keep the media and a compact D-pad with Back/Home together, with a side-by-side layout where space permits. Mode targets and the Play fallback stay at least 44 CSS pixels high. Preserve the existing stroke icons, native-dialog focus behavior and native Escape dismissal; Escape never sends TV Back.
+
+### Continuous video
+
+Start live video requests an owned producer through the paired companion. The player waits for Ready, then prefers the locally bundled hls.js player when its MSE/Managed Media Source feature check passes, including compatible Safari versions. Native HLS remains the fallback where that player is unavailable, including older iOS Safari. It is muted, inline and has native controls. A ready playlist is not proof of playback: only the video's Playing event may produce the playing label. Waiting/stalled events show Buffering. Autoplay rejection exposes a usable Play video button. D-pad controls remain available while starting or paused.
+
+State the limits briefly: continuous video without audio on the tested API 25 Fire TV, a delay of several seconds, and an awake companion computer. The feed includes the Fire TV stick's output, not Samsung apps, native AirPlay or other HDMI sources. Protected content may be blank. Do not label this an unrestricted television feed or imply protected playback was tested.
+
+Stop immediately clears the player, removes its source and listeners, and destroys any HLS instance. Closing or switching sheets, choosing Snapshots, hiding/leaving the page, offline state and session expiry also stop the owner. Pending Start must settle before its captured owner's Stop; disable another Start until cleanup responds or its bounded deadline ends. Late start, status, keepalive and player callbacks cannot restore media, stop a newer local generation or expire a newly paired session. Resume is explicit.
+
+Poll status during startup and more slowly when ready; renew the lease every ten seconds only while the owner is active and visible. The backend's thirty-second lease and fifteen-minute maximum also bound abandoned sessions. Its temporary rolling HLS buffer is private and removed on stop/expiry. Media uses a scoped HttpOnly same-origin cookie; control requests use bearer headers. Never place authorization tokens in playlist/segment URLs or expose media as public static assets. Use no external player CDN or worker; the current HLS player uses bounded buffers and `enableWorker:false`.
+
+Actual Fire TV encoding, Hls.js browser decoding, changing TV content and playback beyond one minute have been verified, together with Home/D-pad navigation and Stop clearing the player and producer. Live video layouts at 320 and 390 CSS pixels had no horizontal overflow. The player lifecycle is also covered with fake video/HLS objects, including passive opening, playback events, autoplay refusal, owner-token races and teardown. Native iPhone/Safari playback, precise end-to-end delay and protected-service playback remain unverified.
+
+### Snapshots
 
 Only one frame request runs at a time, with three seconds between completed requests and the next attempt. Stop pauses and keeps a clearly labeled last image. Closing or switching sheets, hiding/leaving the page, offline state or session expiry clears it and prevents late responses from restoring it. Resume requires Start. Display the conservative capture-start time and transfer latency; an old request must never appear newly captured on arrival. Error/timeout states stay visible inside the sheet. A server request already in progress can finish after browser cancellation within its capture deadline.
 

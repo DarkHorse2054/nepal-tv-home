@@ -19,7 +19,7 @@ A calm, dark home screen for Fire TV with Himalayan scenes, an English clock, a 
 - AirPlay connection help in TV Home and the phone remote, using a compatible television's built-in receiver.
 - An optional phone/web remote with the same tools, a glass D-pad, app dock, Type on TV, Samsung controls and connection recovery.
 - An ESPN launch shortcut in remote Settings; install the official app separately.
-- Optional Fire TV screen preview in the phone remote, with explicit Start/Stop, capture timestamps and an in-sheet D-pad; refreshed images, no audio.
+- Optional **Live view** in the phone remote: continuous video or separate Snapshots, explicit Start/Stop and an in-sheet D-pad; no audio on the tested Fire TV.
 
 Netflix, YouTube, Disney+, Paramount+ and Hulu are the default favorites. Install the apps separately; subscriptions are not included.
 
@@ -31,9 +31,15 @@ The redesigned companion uses a warm Himalayan theme, a floating app dock and ma
 
 *Remote interface. The computer must stay awake while using the phone remote; on-TV Tools run directly on the Fire TV. Native AirPlay streams directly to a compatible television and does not require the companion computer.*
 
-**Screen preview**, below the remote's Tools row, starts only after you select **Start preview**. It shows Fire TV screenshots with navigation controls, then waits three seconds after each request before capturing again. Stop retains a paused image; closing or leaving clears it. Keep the companion computer awake. This does not show Samsung apps, native AirPlay or other HDMI sources, and protected video may be blank. Preview alone requires optional Pillow; see [preview setup and limits](remote/README.md#screen-preview).
+**Live view**, below the remote's Tools row, defaults to **Live video** and starts only after **Start live video**. The Fire TV sends continuous H.264 through the awake companion computer, which supplies an HLS player with navigation controls. Expect several seconds of delay and video without audio on the tested stick. The included local HLS player is preferred where supported, including compatible Safari versions; native HLS is the fallback on browsers such as older iOS Safari. Stop, closing/hiding the page or losing the session clears playback and ends the owned producer. It never resumes automatically. Continuous video needs optional FFmpeg and the pinned official scrcpy server; see [Live view setup and limits](remote/README.md#live-view).
 
-<img src="docs/images/screen-preview.png" alt="Actual Fire TV screen preview, paused, with capture time and navigation controls" width="360">
+<img src="docs/images/live-video.png" alt="Actual Fire TV Home streaming continuously in the phone-sized remote with navigation controls" width="360">
+
+The **Snapshots** mode retains the earlier still-image preview: select **Start preview**, then one capture runs at a time with a three-second wait after each request. Stop retains a labeled paused image; closing or leaving clears it. Snapshots alone needs optional Pillow. Neither mode shows Samsung apps, native AirPlay or other HDMI sources; protected video may be blank.
+
+<img src="docs/images/screen-preview.png" alt="Earlier Snapshots interface showing a paused actual Fire TV screen capture, its time and navigation controls" width="360">
+
+*Snapshots mode, captured before the continuous-video player was added. This still image is not evidence of live video playback.*
 
 Follow [remote setup](remote/README.md) to configure your own devices and start the local server. NPL TV is an optional sixth dock shortcut. ESPN opens from remote Settings or the launcher’s app drawer after installation. These apps and their subscriptions are not included.
 
