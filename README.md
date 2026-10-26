@@ -53,6 +53,10 @@ Installing the app **does not root, debloat or automatically fix the physical Ho
 
 Clock locations currently default to San Mateo and Kathmandu in source. On-TV weather defaults to San Mateo’s city center in Fahrenheit; its location is currently edited in source. The companion’s optional weather location is configurable and disabled in the public example. A first-run location wizard is not built. The offline civil calendar ends at BS 2083, then falls back to Gregorian; it is not a panchang. Samsung Sources opens the real picker, without claiming the selected HDMI port through API readback.
 
+## Security
+
+The public source contains no shared TV authorization. Keep your private setup out of Git, use a maintained Python and the pinned requirements, and keep the remote on a trusted LAN. See [security boundaries and reporting](SECURITY.md) and the [review record](docs/SECURITY-REVIEW.md).
+
 ## Project notes
 
 - [On-TV Device, Weather and Wallpaper tools](launcher/HOME-TOOLS.md)

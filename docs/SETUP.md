@@ -72,9 +72,13 @@ Keep the Samsung remote available to return to the Fire TV input during initial 
 
 ## 5. Optional webpage remote
 
-The companion runs on macOS or Linux with Python 3.9+ and `adb`. A phone/tablet on the same LAN can use its browser. From the repository root:
+The companion runs on macOS or Linux with a maintained Python 3.11+ release and `adb`. A phone/tablet on the same LAN can use its browser. From the repository root:
 
 ```sh
+python3 -m venv .venv
+.venv/bin/python -m pip --isolated install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r remote/requirements.txt
+export NEPAL_REMOTE_PYTHON="$PWD/.venv/bin/python"
+umask 077
 mkdir -p remote/state
 cp remote/config.example.json remote/state/config.json
 chmod 700 remote/state
@@ -87,7 +91,7 @@ Edit that private JSON with your own Fire TV address/model and clock labels/time
 ./remote/start.sh --config remote/state/config.json --adb /absolute/path/to/adb
 ```
 
-Use your actual `adb` path. Open the printed LAN URL on your phone and enter the newly generated terminal pairing code. Keep the computer awake and server running. Optional Samsung webpage controls need `websockets>=15,<16` in the server's Python environment and their own on-TV approval. See [the remote README](../remote/README.md) for installation and control details.
+Use your actual `adb` path. Open the printed LAN URL on your phone and enter the newly generated terminal pairing code. Keep the computer awake and server running. Optional Samsung webpage controls need their own on-TV approval and pin the approved TV certificate. Legacy unpinned pairings must be paired explicitly again. See [the remote README](../remote/README.md) for installation and control details.
 
 The remote uses HTTP for a trusted LAN; keep it off public tunnels and router forwarding. Keep runtime configuration, PINs, Samsung tokens, ADB authorization, signing keys and recovery data out of commits and shared archives. Native Sources does not need this server.
 

@@ -8,7 +8,15 @@ The phone interface includes a compact glass directional pad, navigation/playbac
 
 ## Configure before starting
 
-Requires Python 3.9+, an IANA timezone database, and Android Platform Tools. Put `adb` on PATH or supply its absolute path with `--adb`. Samsung support additionally needs `websockets>=15,<16` in the Python environment running the server.
+Requires a maintained Python 3.11+ release, an IANA timezone database, and Android Platform Tools. Put `adb` on PATH or supply its absolute path with `--adb`. Use a virtual environment and the reviewed package versions with verified artifact hashes:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip --isolated install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r remote/requirements.txt
+export NEPAL_REMOTE_PYTHON="$PWD/.venv/bin/python"
+```
+
+The pinned file includes Pillow 13.0.0, websockets 15.0.1 and imageio-ffmpeg 0.6.0. These enable the optional screenshot, Samsung and video features. Keep the running interpreter and packages patched; Python 3.9 is no longer the supported setup. [Security scope and reporting](../SECURITY.md) explains the trusted-LAN boundary.
 
 From the repository root:
 
@@ -59,7 +67,7 @@ There is no automatic device discovery or setup wizard in this initial repositor
 
 The default configuration is `remote/state/config.json`. The default listener is `0.0.0.0:8765`; `--bind 127.0.0.1` limits it to this computer and `--port 8766` changes its port. `--allow-host` adds one explicit local IP or `.local` Host name if route-based local-address selection misses your desired interface. It does not change either configured TV target.
 
-Open the printed LAN URL from your phone and enter the six-digit PIN shown in the terminal. Browser sessions last up to eight hours and are stored in session storage. Stopping the server invalidates them. This is an HTTP service for a trusted home LAN; a public static host cannot provide its local ADB bridge. Do not publish its listener through a public tunnel or router forwarding.
+Open the printed LAN URL from your phone and enter the six-digit PIN shown in the terminal. Browser sessions last up to eight hours and are stored in session storage. Stopping the server invalidates them. This is an HTTP service for a trusted home LAN. It does not encrypt browser traffic against an attacker on that network; a public static host cannot provide its local ADB bridge. Do not publish its listener through a public tunnel or router forwarding.
 
 ADB uses your environment's normal authorization/key location. No SDK, private keys, or machine-specific runtime is bundled. If the Fire TV's DHCP address changes, update the private config and restart; the server does not scan for a replacement.
 
@@ -67,7 +75,9 @@ ADB uses your environment's normal authorization/key location. No SDK, private k
 
 Samsung support uses the local Tizen TLS WebSocket endpoint on port 8002. Compatible models must report the configured exact model and token-auth support. In the webpage, choose Connect Samsung and accept Allow on your own television. This approval is separate from the webpage PIN.
 
-Authorizations are saved as `remote/state/samsung-<target-fingerprint>.json` with mode `0600` in a `0700` directory. The filename and file contents bind the token to the configured host and model. Tokens are never returned to the webpage or logged. Keep all `state/` contents out of commits and release archives.
+Authorizations and the approved Samsung certificate SHA-256 are saved as `remote/state/samsung-<target-fingerprint>.json` with mode `0600` in a `0700` directory. The filename and file contents bind the token to the configured host and model. Tokens are never returned to the webpage or logged. Keep all `state/` contents out of commits and release archives.
+
+The TV's self-signed certificate is trusted on first use only during explicit pairing on your trusted LAN. HTTPS identity checks and the WebSocket handshake must present that same certificate; the saved token is never sent before the peer passes this check. A changed certificate is refused even when Pair is pressed again. Existing unpinned token files require explicit pairing after this update. Review a certificate-change error before deliberately removing the private pairing file and pairing the correct TV again; do not bypass it blindly. No certificate or token is supplied by the repository.
 
 Status reads local token/runtime authorization state only; it is not a live Samsung connection probe. Rejected authorization keeps the connection UI unpaired until explicit pairing succeeds. Pairing is limited to one request per minute, with a separate Samsung lock; Fire TV controls keep working during the approval wait.
 
@@ -144,7 +154,7 @@ The helper downloads the official release, verifies its pinned SHA-256 and store
 Live video also needs an FFmpeg executable with `libx264` encoding. Use an existing `ffmpeg` on PATH, pass `--ffmpeg /absolute/path/ffmpeg`, or install the optional bundled executable into the same Python environment that runs the companion:
 
 ```sh
-python3 -m pip install imageio-ffmpeg
+python3 -m pip --isolated install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r remote/requirements.txt
 ./remote/start.sh
 # Explicit tool locations are also supported:
 ./remote/start.sh --scrcpy-server /absolute/path/scrcpy-server-v5.0.1 --ffmpeg /absolute/path/ffmpeg
@@ -171,7 +181,7 @@ Preview requires the companion computer to stay awake, Fire TV to be reachable, 
 Snapshots additionally needs [Pillow](https://pillow.readthedocs.io/en/stable/installation/basic-installation.html) in the Python environment that runs the companion:
 
 ```sh
-python3 -m pip install --upgrade Pillow
+python3 -m pip --isolated install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r remote/requirements.txt
 ```
 
 Use that environment's Python executable if it differs from `python3`. Pillow is optional: without it, pairing, remote controls and the other tools still work, while Snapshots reports `preview_dependency_missing`. Continuous video uses its separate FFmpeg/scrcpy tools.

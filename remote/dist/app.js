@@ -34,6 +34,10 @@
     samsung_connection_failed: 'Could not reach Samsung. Check that the TV is on.',
     samsung_timeout: 'Samsung took too long to respond.',
     samsung_not_configured: 'Samsung controls have not been set up on your Mac.',
+    samsung_certificate_required: 'Review the TV address, then connect Samsung to verify its identity.',
+    samsung_certificate_mismatch: 'Samsung TV identity changed. Controls are blocked. Verify the TV and review its saved pairing on your Mac.',
+    samsung_certificate_unavailable: 'Samsung TV identity could not be checked. Controls are blocked. Check the TV and review pairing on your Mac.',
+    samsung_invalid_certificate: 'Samsung TV identity could not be verified. Controls are blocked. Review TV setup on your Mac.',
     feature_rate_limited: 'Give the remote a moment, then refresh.',
     invalid_wallpaper_mode: 'Choose Auto, Morning, Dusk or Night.',
     wallpaper_unavailable: 'Wallpaper control is unavailable. Check that Nepal Home is up to date.',
@@ -58,6 +62,9 @@
     live_invalid_media: 'Fire TV did not return playable video.',
     live_not_found: 'The live video session ended. Start it again.',
   };
+  const SAMSUNG_REVIEW_ERRORS = new Set(['samsung_pair_required', 'samsung_authorization_denied',
+    'samsung_certificate_required', 'samsung_certificate_mismatch',
+    'samsung_certificate_unavailable', 'samsung_invalid_certificate']);
   const keyButtons = [...document.querySelectorAll('[data-key]')];
   const appButtons = [...document.querySelectorAll('[data-app]')];
   const samsungButtons = [...document.querySelectorAll('[data-samsung]')];
@@ -73,6 +80,7 @@
   let checkedStatus = false;
   let samsungEnabled = false;
   let samsungPaired = false;
+  let samsungNeedsReview = false;
   let samsungBusy = false;
   let samsungMessage = '';
   let lastSeen = null;
@@ -250,7 +258,7 @@
         if (token !== requestToken) return;
         checkedStatus = true;
         samsungEnabled = data.samsung?.enabled === true;
-        if (!samsungBusy) samsungPaired = data.samsung?.paired === true;
+        if (!samsungBusy) samsungPaired = data.samsung?.paired === true && !samsungNeedsReview;
         applySamsungSourceLabels(data.samsung?.sourceLabels);
         showSamsungLastSent(data.samsung?.lastSent);
         if (typeof data.device?.name === 'string' && data.device.name) $('#device-name').textContent = data.device.name;
@@ -358,7 +366,9 @@
       const data = await api('/api/samsung/key', { method: 'POST', body: { key }, timeoutMs: 12000 });
       if (data.state === 'sent') showSamsungLastSent({ key, sentAt: data.sentAt });
     } catch (error) {
-      if (error.code === 'samsung_pair_required' || error.code === 'samsung_authorization_denied') samsungPaired = false;
+      if (SAMSUNG_REVIEW_ERRORS.has(error.code)) {
+        samsungPaired = false; samsungNeedsReview = true; samsungMessage = error.message;
+      }
       if (error.status !== 401) toast(error.name === 'AbortError' ? 'Samsung took too long. Check the TV before trying again.' : error.status ? error.message : 'The action could not be confirmed. Check the TV before trying again.');
     } finally { samsungBusy = false; renderState(); }
   }
@@ -369,8 +379,10 @@
     try {
       const data = await api('/api/samsung/pair', { method: 'POST', body: {}, timeoutMs: 38000 });
       samsungPaired = data.state === 'authorized';
+      if (samsungPaired) samsungNeedsReview = false;
       samsungMessage = samsungPaired ? 'Paired. Samsung controls are available independently of Fire TV.' : 'Approval timed out. Connect again while you are beside the TV.';
     } catch (error) {
+      if (SAMSUNG_REVIEW_ERRORS.has(error.code)) { samsungPaired = false; samsungNeedsReview = true; }
       samsungMessage = error.name === 'AbortError' ? 'Samsung took too long. Try connecting again.' : error.message;
     } finally { samsungBusy = false; renderState(); }
   });

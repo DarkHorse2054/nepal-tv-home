@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paired local-LAN remote for an explicitly configured, user-owned Fire TV. Python 3.9+."""
+"""Paired local-LAN remote for an explicitly configured, user-owned Fire TV. Python 3.11+."""
 import argparse
 import asyncio
 import contextlib
@@ -24,6 +24,9 @@ import threading
 import time
 from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
+
+if sys.version_info < (3, 11):
+    raise SystemExit("Python 3.11+ is required; use a maintained Python with remote/requirements.txt.")
 
 HERE = Path(__file__).resolve().parent
 
@@ -80,6 +83,7 @@ APPS = {
     "npl": "app.nepal.npltv/.MainActivity",
     "espn": "com.espn.gtv/com.espn.startup.presentation.StartupActivity",
 }
+REQUEST_READ_SECONDS = 5
 TEXT_MAX_LENGTH = 160
 TEXT_MAX_SEGMENTS = 4
 MONTHS = ("Baisakh", "Jestha", "Ashadh", "Shrawan", "Bhadra", "Ashwin",
@@ -395,13 +399,15 @@ SAMSUNG_EXPERIMENTAL_KEYS = frozenset(("hdmi1", "hdmi2", "hdmi3", "hdmi4"))
 SAMSUNG_KEYS = frozenset(("source", "up", "down", "left", "right", "ok", "back",
                           "volume_up", "volume_down", "mute", "power_off")) | SAMSUNG_EXPERIMENTAL_KEYS
 SAMSUNG_PATHS = frozenset(("/api/samsung/pair", "/api/samsung/key"))
+SAMSUNG_REVIEW_CODES = frozenset(("certificate_required", "certificate_mismatch",
+                                  "certificate_unavailable", "invalid_certificate"))
 SAMSUNG_ERROR_CODES = frozenset((
     "unsafe_token_path", "unsafe_token_file", "invalid_token_file", "invalid_token",
     "token_storage_failed", "identity_unavailable", "identity_too_large", "invalid_identity",
     "tv_unavailable", "wrong_tv_model", "unsupported_auth", "websockets_dependency_missing",
     "connect_timeout", "connection_failed", "not_connected", "connection_closed",
     "invalid_message", "authorization_denied", "too_many_messages", "send_failed",
-    "pair_required", "invalid_timeout", "invalid_navigation"))
+    "pair_required", "invalid_timeout", "invalid_navigation")) | SAMSUNG_REVIEW_CODES
 
 
 def load_samsung_module():
@@ -502,7 +508,7 @@ class SamsungBridge:
             except ApiError:
                 raise
             except self.module.SamsungError as error:
-                if error.code in ("authorization_denied", "pair_required"):
+                if error.code in SAMSUNG_REVIEW_CODES or error.code in ("authorization_denied", "pair_required"):
                     self.needs_pair = True
                 code = error.code if error.code in SAMSUNG_ERROR_CODES else "unavailable"
                 raise ApiError(503, "samsung_" + code) from None
@@ -670,6 +676,44 @@ class Handler(BaseHTTPRequestHandler):
         self.request.settimeout(5)
         super().setup()
 
+    def handle_one_request(self):
+        # A socket idle timeout alone can be reset forever by trickled bytes.
+        # Each request owns its timer state so an old callback cannot affect a
+        # later keep-alive request. All application/device work starts after cancel.
+        phase = {"lock": threading.Lock(), "active": True, "expired": False}
+        phase["timer"] = threading.Timer(REQUEST_READ_SECONDS, self._expire_read_phase, args=(phase,))
+        phase["timer"].daemon = True
+        self._read_phase = phase
+        phase["timer"].start()
+        try:
+            super().handle_one_request()
+        finally:
+            self._cancel_read_phase(phase)
+
+    def _expire_read_phase(self, phase):
+        with phase["lock"]:
+            if not phase["active"]:
+                return
+            phase["active"], phase["expired"] = False, True
+            try:
+                self.request.shutdown(socket.SHUT_RD)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _cancel_read_phase(phase):
+        with phase["lock"]:
+            phase["active"] = False
+            phase["timer"].cancel()
+
+    def _finish_read_phase(self):
+        phase = self._read_phase
+        with phase["lock"]:
+            phase["active"] = False
+            phase["timer"].cancel()
+            if phase["expired"]:
+                raise ApiError(408, "request_timeout")
+
     def log_message(self, *_args):
         pass  # Never log pairing bodies, tokens, client identifiers, or URL query strings.
 
@@ -705,6 +749,8 @@ class Handler(BaseHTTPRequestHandler):
             if len(self.path) > 1024 or not self.path.startswith("/") or self.path.startswith("//"):
                 raise ApiError(400, "invalid_path")
             length = app.validate_headers(self.headers, method)
+            if method in ("GET", "HEAD"):
+                self._finish_read_phase()
             parsed = urlsplit(self.path)
             if parsed.query or parsed.fragment:
                 raise ApiError(404, "not_found")
@@ -750,6 +796,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(415, "json_required")
             try:
                 raw = self.rfile.read(length)
+                self._finish_read_phase()
                 if len(raw) != length:
                     raise ValueError()
                 payload = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json_object)
