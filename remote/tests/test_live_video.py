@@ -426,10 +426,14 @@ class TransportTests(unittest.TestCase):
                         else:
                             encoded_frames.append((len(data), data[0], data[-1]))
                             folder = Path(manager.session.directory)
-                            for name, content in (("index.m3u8", b"#EXTM3U\npart000000.ts\n"), ("part000000.ts", b"fake media")):
+                            for name, content in (("part000000.ts", b"fake media"), ("index.m3u8", b"#EXTM3U\npart000000.ts\n")):
                                 path = folder / name
-                                path.write_bytes(content)
-                                path.chmod(0o600)
+                                # Match FFmpeg: publish complete 0600 media atomically.
+                                temporary = path.with_name(name + ".tmp")
+                                descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                                with os.fdopen(descriptor, "wb") as output:
+                                    output.write(content)
+                                os.replace(temporary, path)
                     def flush(self): pass
                     def close(self): pass
                 process.stdin = Input()
