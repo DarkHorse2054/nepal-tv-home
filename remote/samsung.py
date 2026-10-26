@@ -5,6 +5,7 @@ import asyncio
 import base64
 import contextlib
 import http.client
+import hashlib
 import importlib.util
 import json
 import logging
@@ -73,12 +74,64 @@ def _valid_token(value):
     return value if re.fullmatch(r"[A-Za-z0-9_-]{1,512}", value, flags=re.ASCII) else None
 
 
-def fetch_info(target):
+def _valid_fingerprint(value):
+    return value if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value, re.ASCII) else None
+
+
+def _peer_fingerprint(peer, expected=None, *, allow_unpinned=False):
+    if not expected and not allow_unpinned:
+        raise SamsungError("certificate_required")
+    try:
+        certificate = peer.getpeercert(binary_form=True)
+    except (AttributeError, OSError, ValueError):
+        raise SamsungError("certificate_unavailable") from None
+    if not certificate:
+        raise SamsungError("certificate_unavailable")
+    fingerprint = hashlib.sha256(certificate).hexdigest()
+    if expected and not secrets.compare_digest(fingerprint, expected):
+        raise SamsungError("certificate_mismatch")
+    return fingerprint
+
+
+def _pinned_connection(expected, base=None):
+    if base is None:
+        try:
+            from websockets.asyncio.client import ClientConnection
+        except ImportError:
+            raise SamsungError("websockets_dependency_missing") from None
+        base = ClientConnection
+
+    class PinnedConnection(base):
+        async def handshake(self, *args, **kwargs):
+            # TLS is established, but no HTTP Upgrade (and therefore no token URL)
+            # is sent until this exact connection presents the approved leaf.
+            _peer_fingerprint(self.transport.get_extra_info("ssl_object"), expected)
+            return await super().handshake(*args, **kwargs)
+
+    return PinnedConnection
+
+
+def _fixed_connector():
+    try:
+        from websockets.asyncio.client import connect
+    except ImportError:
+        raise SamsungError("websockets_dependency_missing") from None
+
+    class FixedEndpointConnect(connect):
+        def process_redirect(self, error):
+            return error  # The configured TV endpoint may never redirect credentials elsewhere.
+
+    return FixedEndpointConnect
+
+
+def fetch_info(target, *, expected_fingerprint=None, allow_unpinned=False):
     """Read one fixed TLS URL. HTTPConnection never follows redirects or proxies."""
     target = validated_target(target)
     connection = http.client.HTTPSConnection(
         target["host"], target["port"], timeout=2, context=ssl._create_unverified_context())
     try:
+        connection.connect()
+        fingerprint = _peer_fingerprint(connection.sock, expected_fingerprint, allow_unpinned=allow_unpinned)
         connection.request("GET", "/api/v2/", headers={"Accept": "application/json"})
         response = connection.getresponse()
         if response.status != 200:
@@ -92,7 +145,7 @@ def fetch_info(target):
             raise SamsungError("invalid_identity")
         if not isinstance(value, dict):
             raise SamsungError("invalid_identity")
-        return value
+        return value, fingerprint
     except SamsungError:
         raise
     except (OSError, http.client.HTTPException):
@@ -108,7 +161,7 @@ class TokenStore:
         if self.path.resolve().is_relative_to(DIST):
             raise SamsungError("unsafe_token_path")
 
-    def load(self):
+    def load_record(self):
         try:
             descriptor = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
         except FileNotFoundError:
@@ -128,17 +181,32 @@ class TokenStore:
             token = _valid_token(value.get("token"))
             if not token:
                 raise SamsungError("invalid_token_file")
-            return token
+            fingerprint = value.get("certificate_sha256")
+            if fingerprint is not None and not _valid_fingerprint(fingerprint):
+                raise SamsungError("invalid_token_file")
+            return {"token": token, "certificate_sha256": fingerprint}
         except (ValueError, UnicodeError, OSError):
             raise SamsungError("invalid_token_file") from None
         finally:
             if descriptor is not None:
                 os.close(descriptor)
 
-    def save(self, token):
+    def load(self):
+        record = self.load_record()
+        # A legacy token is not proof of the peer's identity. Upgrade only through
+        # an explicit approval, never by silently trusting the next LAN response.
+        return record["token"] if record and record["certificate_sha256"] else None
+
+    def save(self, token, certificate_sha256):
         token = _valid_token(token)
         if not token:
             raise SamsungError("invalid_token")
+        fingerprint = _valid_fingerprint(certificate_sha256)
+        if not fingerprint:
+            raise SamsungError("invalid_certificate")
+        previous = self.load_record()
+        if previous and previous["certificate_sha256"] and not secrets.compare_digest(previous["certificate_sha256"], fingerprint):
+            raise SamsungError("certificate_mismatch")
         parent = self.path.parent
         temporary = None
         descriptor = None
@@ -155,7 +223,8 @@ class TokenStore:
             os.fchmod(descriptor, 0o600)
             with os.fdopen(descriptor, "w", encoding="utf-8") as output:
                 descriptor = None
-                json.dump({"host": self.target["host"], "model": self.target["model"], "token": token}, output,
+                json.dump({"host": self.target["host"], "model": self.target["model"], "token": token,
+                           "certificate_sha256": fingerprint}, output,
                           separators=(",", ":"))
                 output.flush()
                 os.fsync(output.fileno())
@@ -174,11 +243,13 @@ class TokenStore:
 
 class SamsungRemote:
     """Only connect(pair=True) may initiate a new TV approval request."""
-    def __init__(self, target, token_store=None, *, _fetch_info=None, _connector=None):
+    def __init__(self, target, token_store=None, *, _fetch_info=None, _connector=None, _connection_base=None):
         self.target = validated_target(target)
         self.store = token_store or TokenStore(self.target)
-        self._fetch_info = _fetch_info or (lambda: fetch_info(self.target))
+        self._fetch_info = _fetch_info or (lambda **options: fetch_info(self.target, **options))
         self._connector = _connector
+        self._connection_base = _connection_base
+        self._fingerprint = None
         self._socket = None
         self._token = None
         self.authorized = False
@@ -193,11 +264,19 @@ class SamsungRemote:
         if self.authorized and self._socket is not None:
             return self.state("authorized")
         if self._socket is None:
-            self._token = None if pair else self.store.load()
+            record = self.store.load_record()
+            previous_pin = record["certificate_sha256"] if record else None
+            self._token = record["token"] if record and previous_pin and not pair else None
             if self._token is None and not pair:
                 return self.state("pair_required")
             try:
-                info = await asyncio.wait_for(asyncio.to_thread(self._fetch_info), timeout=3)
+                info, self._fingerprint = await asyncio.wait_for(asyncio.to_thread(
+                    self._fetch_info, expected_fingerprint=previous_pin,
+                    allow_unpinned=bool(pair and not previous_pin)), timeout=3)
+                if not _valid_fingerprint(self._fingerprint):
+                    raise SamsungError("certificate_unavailable")
+                if previous_pin and not secrets.compare_digest(previous_pin, self._fingerprint):
+                    raise SamsungError("certificate_mismatch")
                 device = info.get("device", {}) if isinstance(info, dict) else {}
                 if device.get("modelName") != self.target["model"]:
                     raise SamsungError("wrong_tv_model")
@@ -208,17 +287,13 @@ class SamsungRemote:
                 if self._token:
                     query["token"] = self._token
                 uri = "wss://" + self.target["host"] + ":" + str(self.target["port"]) + "/api/v2/channels/samsung.remote.control?" + urlencode(query)
-                connector = self._connector
-                if connector is None:
-                    try:
-                        from websockets.asyncio.client import connect
-                    except ImportError:
-                        raise SamsungError("websockets_dependency_missing")
-                    connector = connect
+                connector = self._connector or _fixed_connector()
+                connection_type = _pinned_connection(self._fingerprint, self._connection_base)
                 self._socket = await asyncio.wait_for(connector(
                     uri, ssl=ssl._create_unverified_context(), proxy=None,
                     open_timeout=4, close_timeout=2, max_size=MAX_MESSAGE_BYTES,
-                    max_queue=4, compression=None, ping_interval=None, logger=TRANSPORT_LOG),
+                    max_queue=4, compression=None, ping_interval=None, logger=TRANSPORT_LOG,
+                    create_connection=connection_type),
                     timeout=5)
             except SamsungError:
                 raise
@@ -268,7 +343,7 @@ class SamsungRemote:
                 token = _valid_token(data.get("token"))
                 if token:
                     try:
-                        self.store.save(token)
+                        self.store.save(token, self._fingerprint)
                     except SamsungError:
                         await self.close()
                         raise

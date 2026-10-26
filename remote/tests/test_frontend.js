@@ -423,6 +423,31 @@ test('Samsung failures remain visible inside Sources rather than behind its back
   assert.equal(notice.hidden, true, 'Reopening Sources must not show stale feedback');
 });
 
+test('Samsung certificate failures block controls until explicit pairing succeeds, despite stale status', async t => {
+  for (const code of ['certificate_required', 'certificate_mismatch', 'certificate_unavailable', 'invalid_certificate']) await t.test(code, async () => {
+    const ui = harness(); await flush(); ui.click('#sources-button');
+    const pending = ui.defer('/api/samsung/key');
+    ui.click('[data-samsung="source"]'); await flush();
+    pending.resolve({ state: 'error', error: `samsung_${code}` }, 503); await flush();
+    assert.equal(ui.get('[data-samsung="source"]').disabled, true);
+    assert.equal(ui.get('[data-samsung="volume_up"]').disabled, true);
+    assert.match(ui.get('#sources-dialog-notice').textContent, /identity|verified/);
+    assert.match(ui.get('#samsung-message').textContent, /Review|review/);
+    assert.equal(ui.warnings.length, 0, 'Identity errors must not log certificate or token material');
+    await ui.clock.advance(6000); // The fake status still advertises its old paired state.
+    assert.equal(ui.get('[data-samsung="source"]').disabled, true);
+    assert.equal(ui.calls('/api/samsung/key').length, 1, 'No implicit retry or re-pair is allowed');
+    assert.equal(ui.calls('/api/samsung/pair').length, 0);
+    ui.click('#sources-button');
+    assert.equal(ui.get('#settings-dialog').open, true);
+    const pair = ui.defer('/api/samsung/pair');
+    ui.click('#samsung-pair'); await flush();
+    pair.resolve({ state: 'authorized' }); await flush();
+    assert.equal(ui.get('[data-samsung="source"]').disabled, false);
+    assert.equal(ui.calls('/api/samsung/pair').length, 1);
+  });
+});
+
 test('main remote feedback keeps the global toast and clears when a sheet opens', async () => {
   const ui = harness(); await flush();
   const pending = ui.defer('/api/key');

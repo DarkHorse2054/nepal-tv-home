@@ -251,6 +251,28 @@ class SamsungBridgeTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "samsung_unavailable")
         self.assertTrue(self.clients[-1].closed)
 
+    def test_certificate_errors_are_stable_and_block_controls_without_discarding_saved_auth(self):
+        for code in ("certificate_required", "certificate_mismatch", "certificate_unavailable", "invalid_certificate"):
+            with self.subTest(code=code):
+                self.bridge.needs_pair = False
+                self.store.token = "saved-test-authorization"
+                self.failure = server.SAMSUNG_MODULE.SamsungError(code)
+                before = len(self.clients)
+                with self.assertRaises(server.ApiError) as caught:
+                    self.bridge.key("source")
+                self.assertEqual(caught.exception.code, "samsung_" + code)
+                self.assertFalse(self.bridge.status()["paired"])
+                self.assertEqual(self.store.token, "saved-test-authorization")
+                self.assertEqual(len(self.clients), before + 1)
+                self.assertTrue(self.clients[-1].closed)
+                self.assertFalse(any(call[0] == "navigate" for call in self.clients[-1].calls))
+                self.failure = None
+                with self.assertRaises(server.ApiError) as blocked:
+                    self.bridge.key("source")
+                self.assertEqual(blocked.exception.code, "samsung_pair_required")
+                self.assertEqual(len(self.clients), before + 1)
+                self.now[0] += 1
+
     def test_rejected_saved_auth_stays_unpaired_until_authorized_pair(self):
         self.store.token = "saved-but-rejected"
         self.assertTrue(self.bridge.status()["paired"])
