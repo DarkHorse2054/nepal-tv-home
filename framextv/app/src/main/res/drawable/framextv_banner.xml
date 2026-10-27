@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp" android:viewportWidth="320" android:viewportHeight="180">
+    <!-- Matching original Theater wordmark for TV app lists that use banners. -->
+    <path android:fillColor="#080808" android:pathData="M22,0H298Q320,0 320,22V158Q320,180 298,180H22Q0,180 0,158V22Q0,0 22,0" />
+    <group android:translateX="46" android:translateY="63" android:scaleX="1.4" android:scaleY="1.4">
+        <path android:fillColor="#E50914" android:pathData="M0,0H20V6H13V38H7V6H0Z" />
+        <group android:translateX="23"><path android:fillColor="#E50914" android:pathData="M0,0H6V15H14V0H20V38H14V21H6V38H0Z" /></group>
+        <group android:translateX="46"><path android:fillColor="#E50914" android:pathData="M0,0H20V6H6V15H17V21H6V32H20V38H0Z" /></group>
+        <group android:translateX="69"><path android:fillColor="#E50914" android:fillType="evenOdd" android:pathData="M0,38L8,0H14L22,38H15.5L14,29H8L6.5,38ZM9,23H13L11,10Z" /></group>
+        <group android:translateX="94"><path android:fillColor="#E50914" android:pathData="M0,0H20V6H13V38H7V6H0Z" /></group>
+        <group android:translateX="117"><path android:fillColor="#E50914" android:pathData="M0,0H20V6H6V15H17V21H6V32H20V38H0Z" /></group>
+        <group android:translateX="140"><path android:fillColor="#E50914" android:fillType="evenOdd" android:pathData="M0,0H10Q21,0 21,11Q21,19 15,21L23,38H16L9,22H6V38H0ZM6,6V16H10Q15,16 15,11Q15,6 10,6Z" /></group>
+    </group>
+</vector>

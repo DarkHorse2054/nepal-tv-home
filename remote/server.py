@@ -2,6 +2,7 @@
 """Paired local-LAN remote for an explicitly configured, user-owned Fire TV. Python 3.11+."""
 import argparse
 import asyncio
+import base64
 import contextlib
 import importlib.util
 from collections import defaultdict, deque
@@ -60,6 +61,36 @@ def load_live_video():
 LIVE = load_live_video()
 
 
+def load_fast_input():
+    spec = importlib.util.spec_from_file_location("nepal_fast_input", HERE / "fast_input.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+FAST_INPUT = load_fast_input()
+
+
+def load_trusted_devices():
+    spec = importlib.util.spec_from_file_location("nepal_trusted_devices", HERE / "trusted_devices.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+TRUST = load_trusted_devices()
+
+
+def load_pairing_code():
+    spec = importlib.util.spec_from_file_location("nepal_pairing_code", HERE / "pairing_code.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+PAIRING_CODE = load_pairing_code()
+
+
 def load_local_config():
     spec = importlib.util.spec_from_file_location("portable_remote_config", HERE / "config.py")
     module = importlib.util.module_from_spec(spec)
@@ -82,10 +113,15 @@ APPS = {
     "hulu": "com.hulu.plus/.SplashActivity",
     "npl": "app.nepal.npltv/.MainActivity",
     "espn": "com.espn.gtv/com.espn.startup.presentation.StartupActivity",
+    "framextv": "app.nepal.framextv/.MainActivity",
 }
 REQUEST_READ_SECONDS = 5
 TEXT_MAX_LENGTH = 160
 TEXT_MAX_SEGMENTS = 4
+THEATER_MAX_LENGTH = 160
+THEATER_ENCODED_MAX_LENGTH = 856
+THEATER_ACTION = "app.nepal.framextv.action.REQUEST"
+THEATER_EXTRA = "theater_request"
 MONTHS = ("Baisakh", "Jestha", "Ashadh", "Shrawan", "Bhadra", "Ashwin",
           "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra")
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
@@ -128,6 +164,27 @@ def text_command(value):
                        for part in re.split(r"(?<=%)(?=s)", value))
 
 
+def validate_theater_request(value):
+    """Bounded Unicode text for one native request, never an Android shell string."""
+    if not isinstance(value, str) or any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in value):
+        raise ApiError(400, "invalid_theater_request")
+    clean = value.strip()
+    if not 1 <= len(clean) <= THEATER_MAX_LENGTH:
+        raise ApiError(400, "invalid_theater_request")
+    try:
+        clean.encode("utf-8", errors="strict")
+    except UnicodeError:
+        raise ApiError(400, "invalid_theater_request") from None
+    return clean
+
+
+def theater_payload(value):
+    encoded = base64.urlsafe_b64encode(validate_theater_request(value).encode("utf-8")).decode("ascii").rstrip("=")
+    if not 1 <= len(encoded) <= THEATER_ENCODED_MAX_LENGTH or not re.fullmatch(r"[A-Za-z0-9_-]+", encoded, re.ASCII):
+        raise ApiError(400, "invalid_theater_request")
+    return encoded
+
+
 class ApiError(Exception):
     def __init__(self, status, code):
         self.status = status
@@ -160,31 +217,136 @@ class WindowLimiter:
 
 
 class Pairing:
-    def __init__(self, pin=None, clock=time.monotonic):
+    def __init__(self, pin=None, clock=time.monotonic, trusted=None):
         self.pin = pin or f"{secrets.randbelow(1_000_000):06d}"
         self.clock = clock
+        self.trusted = trusted
         self.tokens = {}
+        self.token_trust = {}
         self.lock = threading.Lock()
         self.lifetime = 8 * 60 * 60
         self.pair_ip = WindowLimiter(5, 60, clock=clock)
         self.pair_global = WindowLimiter(30, 60, clock=clock)
         self.auth_failures = WindowLimiter(20, 60, clock=clock)
+        self.resume_ip = WindowLimiter(20, 60, clock=clock)
+        self.resume_global = WindowLimiter(120, 60, clock=clock)
 
-    def pair(self, pin, client_ip):
+    def _validate_pin(self, pin, client_ip):
         if not self.pair_ip.allow(client_ip) or not self.pair_global.allow("all"):
             raise ApiError(429, "pair_rate_limited")
         if not isinstance(pin, str) or not re.fullmatch(r"\d{6}", pin, flags=re.ASCII):
             raise ApiError(400, "invalid_pin")
         if not secrets.compare_digest(pin, self.pin):
             raise ApiError(401, "incorrect_pin")
+
+    def _mint_locked(self, trusted_cookie=None):
         token = secrets.token_urlsafe(32)
         now = self.clock()
-        with self.lock:
-            self.tokens = {key: expiry for key, expiry in self.tokens.items() if expiry > now}
-            if len(self.tokens) >= 32:
-                self.tokens.pop(min(self.tokens, key=self.tokens.get))
-            self.tokens[hashlib.sha256(token.encode()).digest()] = now + self.lifetime
+        self.tokens = {key: expiry for key, expiry in self.tokens.items() if expiry > now}
+        self.token_trust = {key: value for key, value in self.token_trust.items() if key in self.tokens}
+        if len(self.tokens) >= 32:
+            oldest = min(self.tokens, key=self.tokens.get)
+            self.tokens.pop(oldest)
+            self.token_trust.pop(oldest, None)
+        digest = hashlib.sha256(token.encode()).digest()
+        self.tokens[digest] = now + self.lifetime
+        if trusted_cookie is not None:
+            self.token_trust[digest] = hashlib.sha256(trusted_cookie.encode()).digest()
         return {"token": token, "expiresIn": self.lifetime}
+
+    def pair(self, pin, client_ip):
+        """Legacy API remains an ephemeral eight-hour bearer session."""
+        self._validate_pin(pin, client_ip)
+        with self.lock:
+            return self._mint_locked()
+
+    def _trusted_call(self, method, *args):
+        if self.trusted is None:
+            raise ApiError(503, "trusted_devices_unavailable")
+        try:
+            return getattr(self.trusted, method)(*args)
+        except TRUST.TrustError as error:
+            raise ApiError(error.status, error.code) from None
+
+    def _revoke_trusted_locked(self, raw):
+        self._trusted_call("forget", raw)
+        cookie_digest = hashlib.sha256(raw.encode()).digest()
+        for key, value in list(self.token_trust.items()):
+            if value == cookie_digest:
+                self.tokens.pop(key, None)
+                self.token_trust.pop(key, None)
+
+    def enroll(self, pin, client_ip, remember, previous_cookie=None):
+        if not isinstance(remember, bool):
+            raise ApiError(400, "invalid_payload")
+        self._validate_pin(pin, client_ip)
+        if previous_cookie is not None and (not isinstance(previous_cookie, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", previous_cookie, re.ASCII)):
+            raise ApiError(401, "trusted_device_invalid")
+        with self.lock:
+            if previous_cookie is not None:
+                self._revoke_trusted_locked(previous_cookie)
+            raw = self._trusted_call("remember")[0] if remember else None
+            # A durable trust record must exist before acknowledging enrollment.
+            result = self._mint_locked(raw)
+        result["remembered"] = remember
+        return result, TRUST.cookie_header(raw) if remember else TRUST.cookie_header(clear=True)
+
+    def _resume_limit(self, client_ip):
+        if not self.resume_ip.allow(client_ip) or not self.resume_global.allow("all"):
+            raise ApiError(429, "resume_rate_limited")
+
+    def resume_cookie(self, headers, client_ip, rate_checked=False):
+        if not rate_checked:
+            self._resume_limit(client_ip)
+        try:
+            raw = TRUST.parse_cookie(headers)
+        except TRUST.TrustError as error:
+            raise ApiError(error.status, error.code) from None
+        return self._resume(raw)
+
+    def resume(self, raw, client_ip):
+        self._resume_limit(client_ip)
+        return self._resume(raw)
+
+    def _resume(self, raw):
+        if raw is None:
+            raise ApiError(401, "trusted_device_missing")
+        if not isinstance(raw, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", raw, re.ASCII):
+            raise ApiError(401, "trusted_device_invalid")
+        with self.lock:
+            if not self._trusted_call("valid", raw):
+                raise ApiError(401, "trusted_device_expired")
+            result = self._mint_locked(raw)
+        result["remembered"] = True
+        return result
+
+    def forget(self, token_id, raw):
+        """Revoke browser trust and its bearer sessions without touching the TV."""
+        if not isinstance(token_id, str) or not re.fullmatch(r"[a-f0-9]{64}", token_id, re.ASCII):
+            raise ApiError(401, "pair_required")
+        digest = bytes.fromhex(token_id)
+        if raw is not None and (not isinstance(raw, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", raw, re.ASCII)):
+            raise ApiError(401, "trusted_device_invalid")
+        with self.lock:
+            if self.tokens.get(digest, 0) <= self.clock():
+                raise ApiError(401, "session_expired")
+            cookie_digest = hashlib.sha256(raw.encode()).digest() if raw is not None else None
+            session_trust = self.token_trust.get(digest)
+            if raw is not None:
+                self._trusted_call("forget", raw)
+            if session_trust is not None and session_trust != cookie_digest:
+                # A browser may have cleared/replaced its cookie while its
+                # bearer remains active. Revoke that durable credential too.
+                self._trusted_call("forget_digest", session_trust.hex())
+            # The current bearer is always revoked, including an ephemeral one.
+            # Also invalidate earlier sessions issued for this browser cookie.
+            bound = {value for value in (cookie_digest, session_trust) if value is not None}
+            revoke = {key for key, value in self.token_trust.items() if value in bound}
+            revoke.add(digest)
+            for key in revoke:
+                self.tokens.pop(key, None)
+                self.token_trust.pop(key, None)
+        return {"ok": True}
 
     def authorize(self, header, client_ip):
         if not isinstance(header, str) or not re.fullmatch(r"Bearer [A-Za-z0-9_-]{43}", header):
@@ -197,6 +359,7 @@ class Pairing:
             if expiry > self.clock():
                 return digest.hex()
             self.tokens.pop(digest, None)
+            self.token_trust.pop(digest, None)
         if not self.auth_failures.allow(client_ip):
             raise ApiError(429, "auth_rate_limited")
         raise ApiError(401, "session_expired")
@@ -222,6 +385,7 @@ class AdbBridge:
         self.last_probe = float("-inf")
         self.last_reconnect = float("-inf")
         self.online = False
+        self.fast_input = None
 
     def _run(self, args, timeout=4):
         import os
@@ -269,6 +433,9 @@ class AdbBridge:
             args = ["shell", "am", "start", "-n", APPS[value]]
         elif kind == "text":
             args = ["shell", text_command(value)]
+        elif kind == "theater":
+            args = ["shell", "am", "start", "-n", APPS["framextv"], "-a", THEATER_ACTION,
+                    "--es", THEATER_EXTRA, theater_payload(value)]
         elif kind == "wallpaper" and value in FEATURES.WALLPAPER_MODES:
             args = ["shell", "am", "broadcast", "--user", "0", "-n",
                     "com.gathin.tvhome/.WallpaperCommandReceiver", "-a",
@@ -282,19 +449,36 @@ class AdbBridge:
         try:
             if self.clock() - self.last_probe >= 3 or not self.online:
                 # Reconnection belongs to status, never to a delayed input request.
-                # Worst case here is 1s state + 1s model + 4s command.
+                # State/model checks take 1s each; Theater also allows a 2s wake
+                # before the usual 4s command so a dream cannot cover its UI.
                 if not self._probe(reconnect=False):
                     raise ApiError(503, "tv_unavailable")
+            if kind == "key" and self.fast_input is not None:
+                try:
+                    if self.fast_input.send(KEYS[value]):
+                        return
+                except FAST_INPUT.InputError:
+                    # A failed write may already have dispatched the key. Never
+                    # resend through the legacy input process after that point.
+                    raise ApiError(503, "key_send_uncertain") from None
             try:
+                if kind == "theater":
+                    wake_status, wake_output = self._run(
+                        ["-s", self.serial, "shell", "input", "keyevent", "224"], timeout=2)
+                    if wake_status or re.search(r"(?:^|\n)(?:Error:|Exception|SecurityException|java\.)", wake_output):
+                        raise ApiError(503, "theater_send_uncertain")
                 status, output = self._run(["-s", self.serial, *args], timeout=4)
             except ApiError:
                 if kind == "text":
                     # A lost acknowledgement can follow a partial/full send.
                     # Never replay text or expose it in the error response.
                     raise ApiError(503, "text_send_uncertain") from None
+                if kind == "theater":
+                    raise ApiError(503, "theater_send_uncertain") from None
                 raise
             if status or re.search(r"(?:^|\n)(?:Error:|Exception|SecurityException|java\.)", output):
-                raise ApiError(503, "text_send_uncertain" if kind == "text" else "command_failed")
+                code = "text_send_uncertain" if kind == "text" else "theater_send_uncertain" if kind == "theater" else "command_failed"
+                raise ApiError(503, code)
             if kind == "wallpaper" and not re.search(r'Broadcast completed: result=1, data="wallpaper_applied"(?:,|$)', output):
                 raise ApiError(503, "wallpaper_unavailable")
         finally:
@@ -527,10 +711,11 @@ class SamsungBridge:
 
 
 class RemoteApp:
-    def __init__(self, bridge, hosts, port, dist=HERE / "dist", pairing=None, samsung=None, config=None, device=None, weather=None, preview=None, live=None, live_jar=None, ffmpeg=None):
+    def __init__(self, bridge, hosts, port, dist=HERE / "dist", pairing=None, samsung=None, config=None, device=None, weather=None, preview=None, live=None, live_jar=None, ffmpeg=None, fast_input=None):
         self.bridge, self.hosts, self.port = bridge, set(hosts), port
         self.dist = Path(dist).resolve()
         self.pairing = pairing or Pairing()
+        self.fast_input = fast_input
         self.config = CONFIG.validate(config)
         self.dates = CivilDates(self.config["clocks"])
         self.samsung = samsung if samsung is not None else SamsungBridge(self.config["samsung"])
@@ -619,7 +804,10 @@ class RemoteApp:
     def get_status(self, token_id):
         if not self.status_rate.allow(token_id):
             raise ApiError(429, "status_rate_limited")
-        return {"online": self.bridge.status(),
+        online = self.bridge.status()
+        if online and self.fast_input is not None:
+            self.fast_input.warm()
+        return {"online": online,
                 "device": {"name": self.config["fire_tv"]["name"], "model": self.config["fire_tv"]["model"],
                            "serial": self.config["fire_tv"]["host"] + ":5555"},
                 "date": self.dates.status(), "samsung": self.samsung.status(),
@@ -664,7 +852,11 @@ class RemoteApp:
                 self.capture_mode_lock.release()
 
     def close(self):
-        self.live.close()
+        try:
+            self.live.close()
+        finally:
+            if self.fast_input is not None:
+                self.fast_input.close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -788,10 +980,12 @@ class Handler(BaseHTTPRequestHandler):
                     body, mime = app.static(parsed.path)
                     self.respond(200, body, mime, head=method == "HEAD")
                 return
-            if method != "POST" or parsed.path not in ("/api/pair", "/api/key", "/api/app", "/api/text", "/api/reconnect", "/api/wallpaper", "/api/preview/frame", "/api/live/start", "/api/live/keepalive", "/api/live/stop", *SAMSUNG_PATHS):
+            if method != "POST" or parsed.path not in ("/api/pair", "/api/session/pair", "/api/session/resume", "/api/session/forget", "/api/key", "/api/app", "/api/text", "/api/theater", "/api/reconnect", "/api/wallpaper", "/api/preview/frame", "/api/live/start", "/api/live/keepalive", "/api/live/stop", *SAMSUNG_PATHS):
                 raise ApiError(405, "method_not_allowed")
-            if parsed.path != "/api/pair":
+            if parsed.path not in ("/api/pair", "/api/session/pair", "/api/session/resume"):
                 token_id = app.pairing.authorize(self.headers.get("Authorization"), self.client_address[0])
+            if parsed.path == "/api/session/resume":
+                app.pairing._resume_limit(self.client_address[0])
             if self.headers.get_content_type() != "application/json":
                 raise ApiError(415, "json_required")
             try:
@@ -802,6 +996,31 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json_object)
             except (ValueError, UnicodeError):
                 raise ApiError(400, "invalid_json")
+            if parsed.path in ("/api/pair", "/api/session/pair"):
+                if (not isinstance(payload, dict) or set(payload) not in ({"pin"}, {"pin", "remember"})
+                        or not isinstance(payload["pin"], str)
+                        or ("remember" in payload and not isinstance(payload["remember"], bool))):
+                    raise ApiError(400, "invalid_payload")
+                try:
+                    previous = TRUST.parse_cookie(self.headers)
+                except TRUST.TrustError as error:
+                    if error.status != 401:
+                        raise
+                    # A correct PIN can replace a damaged HttpOnly cookie.
+                    # Resume remains strict; this grants nothing before PIN validation.
+                    previous = None
+                result, cookie = app.pairing.enroll(payload["pin"], self.client_address[0], payload.get("remember", False), previous)
+                self.respond(200, result, extra_headers=(("Set-Cookie", cookie),))
+                return
+            if parsed.path in ("/api/session/resume", "/api/session/forget"):
+                if not isinstance(payload, dict) or payload:
+                    raise ApiError(400, "invalid_payload")
+                if parsed.path.endswith("/resume"):
+                    self.respond(200, app.pairing.resume_cookie(self.headers, self.client_address[0], rate_checked=True))
+                else:
+                    result = app.pairing.forget(token_id, TRUST.parse_cookie(self.headers))
+                    self.respond(200, result, extra_headers=(("Set-Cookie", TRUST.cookie_header(clear=True)),))
+                return
             if parsed.path in ("/api/live/start", "/api/live/keepalive", "/api/live/stop"):
                 if not isinstance(payload, dict) or payload:
                     raise ApiError(400, "invalid_payload")
@@ -815,6 +1034,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, frame, "image/jpeg", extra_headers=(
                     ("X-Preview-Captured-At", captured_at),
                     ("X-Preview-Capture-Ms", duration_ms)))
+                return
+            if parsed.path == "/api/theater":
+                if (not isinstance(payload, dict) or set(payload) != {"request"}
+                        or not isinstance(payload["request"], str)):
+                    raise ApiError(400, "invalid_payload")
+                request = validate_theater_request(payload["request"])
+                app.bridge.command("theater", request)
+                self.respond(200, {"ok": True, "state": "request_sent"})
                 return
             if parsed.path == "/api/wallpaper":
                 if (not isinstance(payload, dict) or set(payload) != {"mode"}
@@ -840,12 +1067,9 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError(400, "invalid_samsung_key")
                 self.respond(200, app.samsung.key(payload["key"]))
                 return
-            field = {"/api/pair": "pin", "/api/key": "key", "/api/app": "app", "/api/text": "text"}[parsed.path]
+            field = {"/api/key": "key", "/api/app": "app", "/api/text": "text"}[parsed.path]
             if not isinstance(payload, dict) or set(payload) != {field} or not isinstance(payload[field], str):
                 raise ApiError(400, "invalid_payload")
-            if field == "pin":
-                self.respond(200, app.pairing.pair(payload[field], self.client_address[0]))
-                return
             if field == "text":
                 validate_text(payload[field])
                 app.bridge.command(field, payload[field])
@@ -856,11 +1080,13 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(400, "invalid_" + field)
             app.bridge.command(field, payload[field])
             self.respond(200, {"ok": True})
-        except ApiError as exc:
+        except (ApiError, TRUST.TrustError) as exc:
             payload = {"error": exc.code}
             if self.path.split("?", 1)[0] in SAMSUNG_PATHS:
                 payload["state"] = "error"
-            self.respond(exc.status, payload, head=method == "HEAD")
+            clear_trust = exc.status == 401 and self.path == "/api/session/resume"
+            self.respond(exc.status, payload, head=method == "HEAD", extra_headers=(
+                (("Set-Cookie", TRUST.cookie_header(clear=True)),) if clear_trust else ()))
         except (OSError, TimeoutError):
             try:
                 self.respond(408, {"error": "request_timeout"}, head=method == "HEAD")
@@ -938,7 +1164,8 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--allow-host", action="append", default=[], help="Extra local Host/IP, never a wildcard")
     parser.add_argument("--adb", type=Path, help="ADB executable (default: adb on PATH)")
-    parser.add_argument("--scrcpy-server", type=Path, help="Optional verified scrcpy 5.0.1 server JAR")
+    parser.add_argument("--scrcpy-server", type=Path, help="Optional verified scrcpy 5.0.1 JAR for fast keys and live video")
+    parser.add_argument("--no-fast-input", action="store_true", help="Use the legacy Android input command for keys")
     parser.add_argument("--ffmpeg", type=Path, help="Optional FFmpeg executable for live video")
     args = parser.parse_args()
     try:
@@ -951,9 +1178,20 @@ def main():
     adb = args.adb or (Path(shutil.which("adb")) if shutil.which("adb") else None)
     if adb is None or not adb.is_file():
         parser.error("ADB was not found. Install Android Platform Tools or supply --adb /absolute/path/to/adb")
+    try:
+        pin = PAIRING_CODE.load_or_create(HERE / "state/pairing-code.json")
+    except PAIRING_CODE.PairingCodeError:
+        parser.error("Cannot load private pairing code. Check remote/state ownership and permissions "
+                     "(directory 0700, file 0600).")
     hosts = local_hosts(configuration["fire_tv"]["host"], args.allow_host)
     bridge = AdbBridge(adb, configuration["fire_tv"])
-    app = RemoteApp(bridge, hosts, args.port, config=configuration, live_jar=args.scrcpy_server, ffmpeg=args.ffmpeg)
+    import os
+    fast_input = None if args.no_fast_input else FAST_INPUT.FastInput(
+        adb, bridge.serial, args.scrcpy_server or (HERE / "state/tools/scrcpy-server-v5.0.1"),
+        dict(os.environ), bridge.live_identity, frozenset(KEYS.values()))
+    bridge.fast_input = fast_input
+    pairing = Pairing(pin=pin, trusted=TRUST.TrustedDevices(HERE / "state/trusted-devices.json", bridge.serial + "|" + bridge.expected_model))
+    app = RemoteApp(bridge, hosts, args.port, config=configuration, pairing=pairing, live_jar=args.scrcpy_server, ffmpeg=args.ffmpeg, fast_input=fast_input)
     import signal
     def terminate_server(_signal, _frame):
         raise KeyboardInterrupt()
@@ -965,7 +1203,7 @@ def main():
                 continue
             print(f"  http://{host}:{args.port}", flush=True)
         print(f"Pairing PIN: {app.pairing.pin}", flush=True)
-        print("Keep this terminal open. Ctrl+C stops the server and expires every session.", flush=True)
+        print("Keep this terminal open. Stopping expires access sessions; remembered browsers can reconnect for 30 days.", flush=True)
         try:
             server.serve_forever(poll_interval=0.5)
         except KeyboardInterrupt:

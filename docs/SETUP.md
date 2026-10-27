@@ -1,6 +1,6 @@
 # Manual setup
 
-This is a source preview of v20 / 4.6.0-home-tools. The recorded hardware is a 2018 Fire TV Stick 4K (AFTMM/mantis), Fire OS 6.7.1.1 / Android API 25, connected to a Samsung UN65TU7000BXZA. Other devices and firmware need their own compatibility checks.
+This is a source preview of launcher v22 / 4.7.0-wallpapers, with six wallpaper choices and optional Theater 2.2.1. The recorded hardware is a 2018 Fire TV Stick 4K (AFTMM/mantis), Fire OS 6.7.1.1 / Android API 25, connected to a Samsung UN65TU7000BXZA. Other devices and firmware need their own compatibility checks.
 
 The launcher can run without the webpage remote. Native Samsung Sources also connects directly from the stick to the display. A computer is needed to build/install the APK, and must stay awake only if you choose to run the optional webpage remote.
 
@@ -22,6 +22,8 @@ cd launcher
 ```
 
 The APK is `launcher/app/build/outputs/apk/debug/app-debug.apk`, relative to the repository root. It is locally debug-signed. The source declares compile SDK 34, minimum SDK 25 and target SDK 29. This build does not install anything or change a device's default Home app. No production signing key or compiled APK is included in the source tree.
+
+The first build downloads the pinned Gradle distribution and build dependencies. Use `--offline` only after those artifacts are cached on your computer.
 
 Optional checks without a TV, from `launcher/`:
 
@@ -91,15 +93,19 @@ Edit that private JSON with your own Fire TV address/model and clock labels/time
 ./remote/start.sh --config remote/state/config.json --adb /absolute/path/to/adb
 ```
 
-Use your actual `adb` path. Open the printed LAN URL on your phone and enter the newly generated terminal pairing code. Keep the computer awake and server running. Optional Samsung webpage controls need their own on-TV approval and pin the approved TV certificate. Legacy unpinned pairings must be paired explicitly again. See [the remote README](../remote/README.md) for installation and control details.
+Use your actual `adb` path. Open the printed LAN URL on your phone and enter the six-digit pairing code shown in the terminal. The companion generates a unique code once per installation and saves it privately in `remote/state/pairing-code.json`; updates and restarts reuse it. Preserve private state when updating, and keep the computer awake and server running.
+
+**Remember this device for 30 days** is checked by default. The same browser at the same remote URL can obtain a fresh eight-hour session after expiry or a companion restart without re-entering the code. Uncheck it on shared devices. Use **Settings → Forget this device** to revoke that browser's saved trust; reconnecting does not extend its absolute thirty-day expiry. Invalid private pairing-code state stops startup rather than silently changing the code. See [pairing and local reset instructions](../remote/README.md#remember-this-browser).
+
+Optional Samsung webpage controls need their own on-TV approval and pin the approved TV certificate. Legacy unpinned pairings must be paired explicitly again. Optional fast keys use the separately installed, pinned scrcpy 5.0.1 server; FFmpeg is needed only for Live video. Browser haptics depend on phone support. See [the remote README](../remote/README.md) for setup and limits.
 
 The remote uses HTTP for a trusted LAN; keep it off public tunnels and router forwarding. Keep runtime configuration, PINs, Samsung tokens, ADB authorization, signing keys and recovery data out of commits and shared archives. Native Sources does not need this server.
 
 ## 6. Home Tools and ESPN
 
-Select the four-square **Tools** icon immediately left of Sources. Weather shows San Mateo current conditions and seven days; Device shows live Fire TV RAM/storage; Wallpaper offers the four existing scenes. Native tools work directly on the Fire TV. See [Home Tools](../launcher/HOME-TOOLS.md) for cache, network and location defaults.
+Select the four-square **Tools** icon immediately left of Sources. Weather shows San Mateo current conditions and seven days; Device shows live Fire TV RAM/storage; Wallpaper offers Automatic, Morning, Dusk, Night, Annapurna and Pashupati. Automatic follows the existing time-of-day schedule; the two cinematic scenes are fixed manual choices. Native tools work directly on the Fire TV. See [Home Tools](../launcher/HOME-TOOLS.md) for cache, network and location defaults, and [wallpaper artwork](WALLPAPER-ARTWORK.md) for the new scenes.
 
-The phone remote has matching Device, Weather and Wallpaper sheets. Its weather is optional: configure the `weather` object described in [remote setup](../remote/README.md). Applying wallpaper through the remote requires launcher v19 or later, built with the same signing identity as your installed copy.
+The phone remote has matching Device, Weather and Wallpaper sheets. Its weather is optional: configure the `weather` object described in [remote setup](../remote/README.md). Original wallpaper modes require launcher v19+; Annapurna and Pashupati require v22. An in-place launcher update must use the same signing identity as your installed copy.
 
 Install **ESPN for Fire TV** from Amazon’s official Appstore. Its store page can also be opened using the documented Amazon deep link:
 
@@ -108,6 +114,12 @@ adb shell am start -a android.intent.action.VIEW -d 'amzn://apps/android?asin=B0
 ```
 
 Choose Get on your own device. Once installed, ESPN appears in the launcher app drawer and opens through **remote Settings → Open ESPN**. Signing in, subscriptions and content availability are handled by ESPN; this source provides no service access. No third-party ESPN APK is bundled.
+
+## 7. Optional Theater
+
+Build and install Theater separately using its [portable build instructions](../framextv/README.md#build-and-install). Phone title requests require Theater 2.2.1 or later. Open it from the launcher app drawer or **remote Settings → Other apps → Open Theater**. The app provides native movie/show search and season/episode selection, then opens the provider's web player inside the app.
+
+For phone requests, choose **Play on Theater** and enter `play Inception (2010)` or `play Breaking Bad s2e3`. A bare title or Search/Find request shows results without autoplaying. The companion wakes Fire TV before the handoff; it does not power on a separate display. Correct-player opening and the empty/loading-grid crash fixes were checked on the tested device, but recent continuous movie playback stalled. Read [Theater's known issues](../framextv/README.md#known-issues) before relying on playback.
 
 ## Current defaults and limits
 

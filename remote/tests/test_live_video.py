@@ -1,4 +1,4 @@
-"""Leased video checks use fake children/sockets and temporary synthetic media only."""
+"""Offline video checks use fake transports and bounded synthetic codec input."""
 import hashlib
 from http.client import HTTPMessage
 import io
@@ -19,6 +19,67 @@ server = base.server
 live = server.LIVE
 OWNER = "a" * 64
 OTHER = "b" * 64
+
+
+class DecoderCodecTests(unittest.TestCase):
+    def test_changed_screen_and_one_repeat_arrive_before_the_source_goes_quiet(self):
+        binary = live.ffmpeg_executable()
+        if not binary:
+            self.skipTest("Optional FFmpeg is not installed")
+        # A detailed first frame supplies codec/probing data, then red changes to
+        # blue. A surface encoder may repeat that blue frame only once while idle.
+        # Keep the decoder's input open: EOF must not be what reveals the change.
+        source = ("testsrc2=size=1280x720:rate=20:duration=0.05[a];"
+                  "color=c=red:size=1280x720:rate=20:duration=0.10[b];"
+                  "color=c=blue:size=1280x720:rate=20:duration=0.10[c];"
+                  "[a][b][c]concat=n=3:v=1:a=0")
+        encoded = subprocess.run([binary, "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", source, "-frames:v", "5", "-c:v", "libx264",
+            "-preset", "ultrafast", "-tune", "zerolatency", "-g", "120",
+            "-an", "-f", "h264", "pipe:1"], stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=5, check=True).stdout
+        manager = live.LiveVideo("/unused/adb", "unused", "/unused/server", {},
+                                 lambda: None, lambda owner: True)
+        job = live.Session(OWNER, time.monotonic())
+        process = subprocess.Popen(manager._decoder_command(binary), stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        job.decoder = process
+        reader = threading.Thread(target=manager._read_frames, args=(job,), daemon=True)
+        reader.start()
+        frame = None
+        try:
+            process.stdin.write(encoded)
+            process.stdin.flush()
+            plane = live.FRAME_WIDTH * live.FRAME_HEIGHT
+            center = (live.FRAME_HEIGHT // 4) * (live.FRAME_WIDTH // 2) + live.FRAME_WIDTH // 4
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                with job.frame_lock:
+                    frame = job.latest_frame
+                if frame is not None and frame[plane + center] > 200:
+                    break
+                if process.poll() is not None:
+                    break
+                time.sleep(.01)
+            self.assertIsNotNone(frame, "The live decoder must produce an image before EOF")
+            # Blue's U/V samples differ sharply from the preceding red frame.
+            self.assertGreater(frame[plane + center], 200,
+                               "The quiet source's changed blue image must not stay queued")
+            self.assertLess(frame[plane + plane // 4 + center], 150)
+            self.assertFalse(process.stdin.closed)
+            self.assertIsNone(process.poll(), "The source remains open and idle")
+        finally:
+            job.stop.set()
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+            reader.join(timeout=2)
+            self.assertFalse(reader.is_alive(), "The owned decoder reader must retire")
 
 
 class ControlledLive(live.LiveVideo):
@@ -294,6 +355,7 @@ class TransportTests(unittest.TestCase):
         self.assertNotIn("-blocksize", command)
         self.assertFalse(any("nobuffer" in value for value in command))
         self.assertIn("passthrough", output)
+        self.assertEqual(output[output.index("-threads:v") + 1], "1")
         self.assertIn("pad=1280:720", " ".join(output))
         encoder = manager._ffmpeg_command(job, "/fixed/ffmpeg")
         before_input = encoder[:encoder.index("-i")]

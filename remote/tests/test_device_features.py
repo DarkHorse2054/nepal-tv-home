@@ -155,9 +155,10 @@ class SampleTests(unittest.TestCase):
             output = "device" if argv[-1] == "get-state" else model if argv[-1] == "ro.product.model" else acknowledgment[0]
             return types.SimpleNamespace(returncode=0, stdout=output)
         bridge = self.bridge(run)
-        bridge.command("wallpaper", "night")
-        self.assertEqual(calls[-1][3:], ["shell", "am", "broadcast", "--user", "0", "-n",
-            "com.gathin.tvhome/.WallpaperCommandReceiver", "-a", "com.gathin.tvhome.action.SET_WALLPAPER", "--es", "mode", "night"])
+        for mode in ("night", "annapurna", "pashupati"):
+            bridge.command("wallpaper", mode)
+            self.assertEqual(calls[-1][3:], ["shell", "am", "broadcast", "--user", "0", "-n",
+                "com.gathin.tvhome/.WallpaperCommandReceiver", "-a", "com.gathin.tvhome.action.SET_WALLPAPER", "--es", "mode", mode])
         for output in ("Broadcast completed: result=0", 'Broadcast completed: result=-1, data="wallpaper_rejected"', ""):
             acknowledgment[0] = output
             with self.assertRaises(server.ApiError) as caught:
@@ -358,9 +359,10 @@ class FeatureRequestTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/api/wallpaper", {"mode": "night"}, auth=True,
             headers=[("Origin", "http://attacker.example")])[0], 403)
         self.assertEqual(self.bridge.commands, [])
-        code, _, content = self.request("POST", "/api/wallpaper", {"mode": "night"}, auth=True)
-        self.assertEqual((code, json.loads(content)), (200, {"ok": True, "mode": "night"}))
-        self.assertEqual(self.bridge.commands, [("wallpaper", "night")])
+        for mode in ("night", "annapurna", "pashupati"):
+            code, _, content = self.request("POST", "/api/wallpaper", {"mode": mode}, auth=True)
+            self.assertEqual((code, json.loads(content)), (200, {"ok": True, "mode": mode}))
+        self.assertEqual(self.bridge.commands, [("wallpaper", mode) for mode in ("night", "annapurna", "pashupati")])
 
     def test_feature_rate_limit_is_shared_between_endpoints(self):
         self.app.device = self.app.weather = types.SimpleNamespace(status=lambda: {})

@@ -10,8 +10,8 @@ android {
         applicationId 'com.gathin.tvhome'
         minSdk 25
         targetSdk 29
-        versionCode 21
-        versionName '4.6.1-airplay-guide'
+        versionCode 22
+        versionName '4.7.0-wallpapers'
     }
 
     buildTypes {

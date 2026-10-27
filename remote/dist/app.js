@@ -3,6 +3,8 @@
 (() => {
   const $ = selector => document.querySelector(selector);
   const SESSION_KEY = 'nepal.remote.session';
+  const REMEMBERED_KEY = 'nepal.remote.remembered';
+  const HAPTICS_KEY = 'nepal.remote.haptics';
   const POLL_MS = 6000;
   const MAX_QUEUE_AGE_MS = 1200;
   const ERROR_MESSAGES = {
@@ -14,8 +16,18 @@
     control_busy: 'Another action is finishing. Try again in a moment.',
     control_rate_limited: 'Give Fire TV a moment, then try again.',
     command_failed: 'Fire TV could not complete that action.',
+    key_send_uncertain: 'The action may have reached the TV. Check before trying again.',
     pair_required: 'Pair this remote to continue.',
     session_expired: 'Your session ended. Pair this remote again.',
+    trusted_device_missing: 'Pair this device once to save your connection.',
+    trusted_device_expired: 'Saved pairing expired. Enter the code on your Mac.',
+    trusted_device_invalid: 'Saved pairing could not be verified. Pair this device again.',
+    trusted_device_storage_unavailable: 'The Mac could not save pairing. Check its private remote state and try again.',
+    trusted_device_unavailable: 'Saved pairing is unavailable on this Mac. Try again.',
+    trusted_devices_unavailable: 'Saved pairing is unavailable on this Mac. Try again.',
+    resume_rate_limited: 'Wait a moment before reconnecting this device.',
+    invalid_theater_request: 'Enter a single-line request of 1 to 160 characters.',
+    theater_send_uncertain: 'The request may have reached Theater. Check the TV before trying again.',
     invalid_text_length: 'Enter between 1 and 160 characters.',
     split_text_required: 'Send this text in smaller parts.',
     unsupported_text_character: 'Use English letters, numbers and standard symbols.',
@@ -39,7 +51,7 @@
     samsung_certificate_unavailable: 'Samsung TV identity could not be checked. Controls are blocked. Check the TV and review pairing on your Mac.',
     samsung_invalid_certificate: 'Samsung TV identity could not be verified. Controls are blocked. Review TV setup on your Mac.',
     feature_rate_limited: 'Give the remote a moment, then refresh.',
-    invalid_wallpaper_mode: 'Choose Auto, Morning, Dusk or Night.',
+    invalid_wallpaper_mode: 'Choose one of the available wallpapers.',
     wallpaper_unavailable: 'Wallpaper control is unavailable. Check that Nepal Home is up to date.',
     preview_busy: 'Another capture is finishing. Waiting a moment…',
     preview_rate_limited: 'Giving Fire TV a moment before the next capture…',
@@ -75,6 +87,13 @@
     mute: 'Mute', power_off: 'Power off', hdmi1: 'HDMI 1', hdmi2: 'HDMI 2', hdmi3: 'HDMI 3', hdmi4: 'HDMI 4',
   };
   let token = readToken();
+  let remembered = readRemembered();
+  let resumePromise = null;
+  let resuming = false;
+  let forgetting = false;
+  let authEpoch = 0;
+  const hapticsAvailable = typeof navigator.vibrate === 'function';
+  let hapticsEnabled = readHaptics();
   let online = false;
   let serverAvailable = true;
   let checkedStatus = false;
@@ -92,6 +111,8 @@
   let hold = null;
   let textSending = false;
   let textIntent = 0;
+  let theaterSending = false;
+  let theaterIntent = 0;
   let toastTimer;
   let toastTarget = null;
 
@@ -99,24 +120,98 @@
     try { return sessionStorage.getItem(SESSION_KEY) || ''; } catch { return ''; }
   }
   function saveToken(value) {
+    const changed = value !== token;
     token = value;
+    if (changed) abandonTheaterAttempt('Pairing changed. Check the TV before sending again.');
     try {
       if (value) sessionStorage.setItem(SESSION_KEY, value);
       else sessionStorage.removeItem(SESSION_KEY);
     } catch { /* Pairing works in memory when browser storage is unavailable. */ }
   }
+  function readRemembered() {
+    try { return localStorage.getItem(REMEMBERED_KEY) === '1'; } catch { return false; }
+  }
+  function saveRemembered(value) {
+    remembered = Boolean(value);
+    try {
+      if (remembered) localStorage.setItem(REMEMBERED_KEY, '1');
+      else localStorage.removeItem(REMEMBERED_KEY);
+    } catch { /* This flag contains no credential; the HttpOnly cookie holds trust. */ }
+  }
+  function readHaptics() {
+    try {
+      const saved = localStorage.getItem(HAPTICS_KEY);
+      if (saved === '0' || saved === '1') return saved === '1';
+    } catch { /* The preference can still be changed for this page. */ }
+    return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+  function renderHaptics() {
+    $('#haptics-toggle').checked = hapticsAvailable && hapticsEnabled;
+    $('#haptics-toggle').disabled = !hapticsAvailable;
+    $('#haptics-test').disabled = !hapticsAvailable || !hapticsEnabled;
+    $('#haptics-help').textContent = hapticsAvailable
+      ? 'Light taps on supported phones.' : 'This browser doesn’t support haptics.';
+  }
+  function haptic() {
+    if (!hapticsAvailable || !hapticsEnabled || document.hidden) return false;
+    try { return navigator.vibrate(8) !== false; }
+    catch { return false; } // Feedback must never interrupt a TV control.
+  }
+  async function resumePairing() {
+    if (resumePromise) return resumePromise;
+    if (!remembered || forgetting || document.hidden) return false;
+    const epoch = authEpoch;
+    resuming = true;
+    renderState();
+    resumePromise = (async () => {
+      try {
+        const data = await api('/api/session/resume', { method: 'POST', body: {}, auth: false,
+          expireSession: false });
+        if (epoch !== authEpoch || forgetting) return false;
+        if (typeof data.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.token) || data.remembered !== true) throw new Error('invalid_session');
+        saveToken(data.token);
+        checkedStatus = false;
+        if ($('#pair-dialog').open) $('#pair-dialog').close();
+        // Let an expired status request finish before starting its replacement.
+        setTimeout(refreshStatus, 0);
+        return true;
+      } catch (error) {
+        if (epoch === authEpoch) {
+          if (error.status === 401 || error.message === 'invalid_session') saveRemembered(false);
+          else if (!error.status) { serverAvailable = false; online = false; invalidateCommands(); }
+        }
+        return false;
+      } finally {
+        if (epoch === authEpoch) { resuming = false; renderState(); }
+      }
+    })();
+    try { return await resumePromise; }
+    finally { resumePromise = null; }
+  }
+  async function recoverSession(requestToken) {
+    if (token !== requestToken) return;
+    authEpoch++;
+    saveToken(''); online = false; samsungPaired = false;
+    invalidateCommands(); renderState();
+    const resumed = await resumePairing();
+    if (!resumed && !token && serverAvailable && !forgetting) openPairing('Enter the code on your Mac to reconnect.');
+  }
   function lastSeenLabel() {
     return lastSeen ? `Last seen ${lastSeen.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Not seen in this session';
   }
   function renderState() {
-    const fireReady = Boolean(token && online && serverAvailable);
-    const samsungReady = Boolean(token && serverAvailable && samsungPaired && !samsungBusy);
+    const fireReady = Boolean(token && online && serverAvailable && !forgetting);
+    const samsungReady = Boolean(token && serverAvailable && samsungPaired && !samsungBusy && !forgetting);
     document.body.classList.toggle('is-online', fireReady);
     document.body.classList.toggle('is-server-offline', !serverAvailable);
     for (const button of [...keyButtons, ...appButtons]) button.disabled = !fireReady;
     for (const button of samsungButtons) button.disabled = !samsungReady;
     $('#type-button').disabled = !fireReady;
     $('#preview-button').disabled = !fireReady;
+    $('#theater-button').disabled = !fireReady;
+    $('#forget-device').hidden = !token;
+    $('#forget-device').disabled = forgetting || !serverAvailable;
+    $('#forget-device').textContent = forgetting ? 'Forgetting…' : 'Forget this device';
     if (!fireReady && (previewRunning || previewUrl)) stopPreview();
     if (!fireReady && liveSession) stopLive('Live view stopped');
     renderPreviewState();
@@ -132,18 +227,22 @@
       : 'Connect once, then select Allow on your Samsung.');
     $('#mac-status').textContent = serverAvailable ? 'Available' : 'Unavailable';
     $('#fire-status').textContent = !token ? 'Pair remote' : !serverAvailable ? 'Not checked' : !checkedStatus ? 'Checking…' : online ? 'Reachable' : 'Offline';
-    $('#connection-label').textContent = !serverAvailable ? 'Mac offline' : !token ? 'Pair remote' : !checkedStatus ? 'Connecting' : online ? 'Connected' : 'Fire TV offline';
+    $('#connection-label').textContent = !serverAvailable ? 'Mac offline' : resuming ? 'Reconnecting' : !token ? 'Pair remote' : !checkedStatus ? 'Connecting' : online ? 'Connected' : 'Fire TV offline';
     $('#connection-banner').hidden = fireReady;
     $('#last-seen').hidden = !token || !checkedStatus || online;
     $('#last-seen').textContent = lastSeenLabel();
-    $('#reconnect-button').disabled = reconnecting;
-    $('#settings-reconnect').disabled = reconnecting;
+    $('#reconnect-button').disabled = reconnecting || resuming || forgetting;
+    $('#settings-reconnect').disabled = reconnecting || resuming || forgetting;
     $('#reconnect-button').textContent = reconnecting ? 'Checking…' : !token ? 'Pair' : 'Reconnect';
     $('#settings-reconnect').lastChild.textContent = reconnecting ? 'Checking…' : !token ? 'Pair this remote' : 'Reconnect Fire TV';
     if (!serverAvailable) {
       $('#status-title').textContent = 'Your Mac is unavailable';
       $('#status-message').textContent = 'Keep the remote running on your Mac and connect to the same Wi-Fi.';
       $('#connection-help').textContent = 'Wake your Mac and check that the remote is still running. Your phone must be on the same Wi-Fi. Then tap Reconnect.';
+    } else if (resuming) {
+      $('#status-title').textContent = 'Reconnecting your remote';
+      $('#status-message').textContent = 'Checking saved pairing…';
+      $('#connection-help').textContent = 'Reconnecting this device automatically.';
     } else if (!token) {
       $('#status-title').textContent = 'Make yourself at home';
       $('#status-message').textContent = 'Pair with the code shown on your Mac.';
@@ -158,6 +257,7 @@
       $('#connection-help').textContent = online ? 'Keep this Mac awake and your phone on the same Wi-Fi. Connected means Fire TV is reachable; it does not confirm that the screen is on.' : 'Turn on Fire TV and check its Wi-Fi. If you see an “Allow USB debugging” prompt on the TV, approve this Mac, then reconnect.';
     }
     updateTextButton();
+    updateTheaterButton();
     renderToolsState();
   }
   function setConnection(isOnline) {
@@ -238,8 +338,7 @@
         error.status = response.status;
         error.code = data.error;
         if (response.status === 401 && options.auth !== false && options.expireSession !== false && token === requestToken) {
-          saveToken(''); online = false; samsungPaired = false; invalidateCommands(); renderState();
-          openPairing('Your session ended. Enter the code shown on your Mac.');
+          await recoverSession(requestToken);
         }
         throw error;
       }
@@ -250,7 +349,8 @@
     } finally { clearTimeout(timeout); options.signal?.removeEventListener('abort', cancel); }
   }
   async function refreshStatus() {
-    if (!token || statusRequest || document.hidden) return statusRequest;
+    if (statusRequest || document.hidden || forgetting) return statusRequest;
+    if (!token) { if (remembered) await resumePairing(); return; }
     const requestToken = token;
     statusRequest = (async () => {
       try {
@@ -272,7 +372,11 @@
     return statusRequest;
   }
   async function reconnect() {
-    if (!token) { openPairing(); return; }
+    if (!token) {
+      if (remembered && await resumePairing()) return;
+      if (serverAvailable) openPairing();
+      return;
+    }
     if (reconnecting) return;
     reconnecting = true;
     invalidateCommands();
@@ -289,16 +393,22 @@
     } finally { reconnecting = false; renderState(); }
   }
   function queueCommand(path, body, options = {}) {
-    if (!online || !token || !serverAvailable || document.hidden || queuedCommands >= 3 || (options.holdRef && queuedCommands > 0)) return Promise.resolve(false);
+    if (!online || !token || !serverAvailable || forgetting || document.hidden || queuedCommands >= 3 || (options.holdRef && queuedCommands > 0) || (options.shouldSend && !options.shouldSend())) return Promise.resolve(false);
+    // Acknowledge the press immediately; this does not confirm TV delivery.
+    if (!options.holdRef) haptic();
     const requestToken = token;
     const epoch = commandEpoch;
     const enqueuedAt = performance.now();
     queuedCommands++;
     const task = commandTail.then(async () => {
-      if (!online || !serverAvailable || token !== requestToken || commandEpoch !== epoch || document.hidden || performance.now() - enqueuedAt > MAX_QUEUE_AGE_MS || (options.holdRef && hold !== options.holdRef)) return false;
+      if (!online || !serverAvailable || token !== requestToken || commandEpoch !== epoch || document.hidden || performance.now() - enqueuedAt > MAX_QUEUE_AGE_MS || (options.holdRef && hold !== options.holdRef) || (options.shouldSend && !options.shouldSend())) return false;
       try {
-        await api(path, { method: 'POST', body, timeoutMs: options.text ? 12000 : 8000 });
-        if (!options.holdRef && navigator.vibrate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) navigator.vibrate(8);
+        const data = await api(path, { method: 'POST', body, timeoutMs: options.timeoutMs ?? (options.text ? 12000 : 8000) });
+        if (options.acceptResponse && !options.acceptResponse(data)) {
+          const error = new Error('The action could not be confirmed. Check the TV before trying again.');
+          error.code = 'theater_send_uncertain';
+          throw error;
+        }
         return true;
       } catch (error) {
         endHold();
@@ -360,7 +470,8 @@
     queueCommand('/api/app', { app: button.dataset.app });
   });
   async function sendSamsung(key) {
-    if (!token || !serverAvailable || !samsungPaired || samsungBusy) return;
+    if (!token || !serverAvailable || !samsungPaired || samsungBusy || forgetting || document.hidden) return;
+    haptic();
     samsungBusy = true; renderState();
     try {
       const data = await api('/api/samsung/key', { method: 'POST', body: { key }, timeoutMs: 12000 });
@@ -427,9 +538,90 @@
     if ($('#type-dialog').open) return;
     textIntent++; textSending = false; $('#tv-text').value = ''; $('#text-error').textContent = ''; updateTextButton();
   });
+
+  function theaterInputError(value) {
+    if ([...value].length > 160) return 'Use 160 characters or fewer.';
+    if (/[\x00-\x1F\x7F-\x9F]/.test(value)) return 'Use a single line without control characters.';
+    if ([...value].some(character => character.length === 1 && character.charCodeAt(0) >= 0xD800 && character.charCodeAt(0) <= 0xDFFF)) return 'Use complete text characters.';
+    return '';
+  }
+  function updateTheaterButton() {
+    const input = $('#theater-request');
+    const ready = Boolean(token && online && serverAvailable && !forgetting && !document.hidden);
+    input.disabled = theaterSending;
+    $('#theater-count').textContent = `${[...input.value].length} / 160`;
+    $('#theater-submit').disabled = theaterSending || !ready || !input.value.trim() || Boolean(theaterInputError(input.value));
+    $('#theater-submit').firstChild.textContent = theaterSending ? 'Sending…' : 'Search & play';
+    $('#theater-state').textContent = !token ? 'Pair this remote to continue.' : !serverAvailable
+      ? 'Your Mac is unavailable. Reconnect to continue.' : !online
+        ? 'Fire TV is offline. Reconnect to continue.' : theaterSending
+          ? 'Sending request…' : 'Ready to search on TV.';
+  }
+  function abandonTheaterAttempt(message = '', clearDraft = false) {
+    theaterIntent++;
+    theaterSending = false;
+    if (clearDraft) $('#theater-request').value = '';
+    $('#theater-error').textContent = message;
+    updateTheaterButton();
+  }
+  $('#theater-button').addEventListener('click', () => {
+    if (!token || !online || !serverAvailable || forgetting || document.hidden) return;
+    abandonTheaterAttempt('', true);
+    openSheet($('#theater-dialog'));
+    $('#theater-request').focus();
+  });
+  $('#theater-request').addEventListener('input', () => {
+    const error = theaterInputError($('#theater-request').value);
+    $('#theater-error').textContent = error;
+    $('#theater-request').setAttribute('aria-invalid', String(Boolean(error)));
+    updateTheaterButton();
+  });
+  $('#theater-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    updateTheaterButton();
+    if ($('#theater-submit').disabled || !$('#theater-dialog').open) return;
+    const intent = ++theaterIntent;
+    const requestToken = token;
+    const submittedDraft = $('#theater-request').value;
+    const request = submittedDraft.trim();
+    const isCurrent = () => intent === theaterIntent && token === requestToken
+      && $('#theater-dialog').open && !document.hidden;
+    theaterSending = true;
+    $('#theater-error').textContent = '';
+    updateTheaterButton();
+    let reportedError = false;
+    const sent = await queueCommand('/api/theater', { request }, {
+      timeoutMs: 12000,
+      shouldSend: isCurrent,
+      acceptResponse: data => data.state === 'request_sent',
+      onError(error) {
+        if (!isCurrent()) return;
+        reportedError = true;
+        $('#theater-error').textContent = error.code === 'theater_send_uncertain' || !error.status
+          ? 'The request may have reached Theater. Check the TV before trying again.' : error.message;
+      },
+    });
+    if (!isCurrent()) return;
+    theaterSending = false;
+    if (sent) {
+      if ($('#theater-request').value === submittedDraft) $('#theater-request').value = '';
+      toast('Request sent to Theater. Check the TV.');
+    } else if (!reportedError) $('#theater-error').textContent = 'Request was not sent. Wait a moment, then try again.';
+    updateTheaterButton();
+  });
+  $('#theater-dialog').addEventListener('close', () => {
+    if (!$('#theater-dialog').open) abandonTheaterAttempt('', true);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && ($('#theater-dialog').open || theaterSending)) {
+      abandonTheaterAttempt(theaterSending ? 'Request interrupted. Check the TV before trying again.' : '');
+    } else updateTheaterButton();
+  });
+  window.addEventListener('pagehide', () => abandonTheaterAttempt('', true));
+
   for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => button.closest('dialog').close());
   for (const sheet of sheets) {
-    sheet.addEventListener('close', invalidateCommands);
+    sheet.addEventListener('close', () => { if (!sheet.open) invalidateCommands(); });
     sheet.addEventListener('close', () => {
       if (!sheet.open && toastTarget?.closest('dialog') === sheet) clearToast();
     });
@@ -440,6 +632,17 @@
     });
   }
   $('#settings-button').addEventListener('click', () => openSheet($('#settings-dialog')));
+  $('#haptics-toggle').addEventListener('change', () => {
+    if (!hapticsAvailable) return;
+    hapticsEnabled = $('#haptics-toggle').checked;
+    try { localStorage.setItem(HAPTICS_KEY, hapticsEnabled ? '1' : '0'); }
+    catch { /* Keep working when browser storage is unavailable. */ }
+    renderHaptics();
+    if (hapticsEnabled) haptic();
+  });
+  $('#haptics-test').addEventListener('click', () => {
+    if (!haptic()) toast('Haptics are unavailable. Check your phone’s vibration settings.');
+  });
   $('#connection-button').addEventListener('click', () => token ? openSheet($('#settings-dialog')) : openPairing());
   $('#reconnect-button').addEventListener('click', reconnect);
   $('#settings-reconnect').addEventListener('click', reconnect);
@@ -449,13 +652,34 @@
     event.preventDefault();
     if ($('#pair-submit').disabled || !/^[0-9]{6}$/.test($('#pair-pin').value)) return;
     $('#pair-submit').disabled = true; $('#pair-submit').firstChild.textContent = 'Connecting…'; $('#pair-error').textContent = '';
+    const epoch = ++authEpoch; resuming = false;
     try {
-      const data = await api('/api/pair', { method: 'POST', body: { pin: $('#pair-pin').value }, auth: false });
+      const data = await api('/api/session/pair', { method: 'POST', body: { pin: $('#pair-pin').value, remember: $('#pair-remember').checked }, auth: false });
+      if (epoch !== authEpoch) return;
       if (typeof data.token !== 'string' || !data.token) throw new Error('The Mac did not return a pairing session. Try again.');
-      saveToken(data.token); checkedStatus = false; $('#pair-pin').value = ''; $('#pair-dialog').close(); renderState(); await refreshStatus();
+      saveToken(data.token); saveRemembered(data.remembered === true); checkedStatus = false; $('#pair-pin').value = ''; $('#pair-dialog').close(); renderState(); await refreshStatus();
     } catch (error) {
-      $('#pair-error').textContent = error.status === 401 || error.status === 403 ? 'That code did not match. Check the code on your Mac.' : error.name === 'AbortError' || !error.status ? 'Cannot reach your Mac. Wake it and check your Wi-Fi.' : error.message;
+      if (epoch === authEpoch) $('#pair-error').textContent = error.status === 401 || error.status === 403 ? 'That code did not match. Check the code on your Mac.' : error.name === 'AbortError' || !error.status ? 'Cannot reach your Mac. Wake it and check your Wi-Fi.' : error.message;
     } finally { $('#pair-submit').disabled = false; $('#pair-submit').firstChild.textContent = 'Connect remote'; }
+  });
+  $('#forget-device').addEventListener('click', async () => {
+    if (!token || forgetting) return;
+    const requestToken = token;
+    authEpoch++; resuming = false; forgetting = true;
+    invalidateCommands(); stopPreview(); renderState();
+    try {
+      await stopLive();
+      await api('/api/session/forget', { method: 'POST', body: {}, sessionToken: requestToken, expireSession: false });
+      saveToken(''); saveRemembered(false); online = false; checkedStatus = false; samsungPaired = false;
+      $('#settings-dialog').close();
+      openPairing('This device was forgotten. Enter the code to pair again.');
+    } catch (error) {
+      if (error.status === 401) {
+        forgetting = false;
+        await recoverSession(requestToken);
+        if (token) toast('Reconnected. Tap Forget this device again.');
+      } else toast(error.status ? error.message : 'Could not forget this device. Reconnect your Mac and try again.');
+    } finally { forgetting = false; renderState(); }
   });
   // Device samples are requested only while their sheet is open and visible.
   let deviceIntent = 0;
@@ -468,7 +692,8 @@
   let wallpaperChoice = 'auto';
   let wallpaperBusy = false;
   let wallpaperIntent = 0;
-  const wallpaperModes = ['auto', 'morning', 'dusk', 'night'];
+  const wallpaperLabels = { auto: 'Auto', morning: 'Morning', dusk: 'Dusk', night: 'Night', annapurna: 'Annapurna', pashupati: 'Pashupati' };
+  const wallpaperModes = Object.keys(wallpaperLabels);
   const wallpaperButtons = [...document.querySelectorAll('[data-wallpaper]')];
 
   let previewMode = 'video';
@@ -530,8 +755,7 @@
         const data = await response.json().catch(() => ({}));
         if (!current()) return;
         if (response.status === 401) {
-          stopPreview(); saveToken(''); online = false; samsungPaired = false; renderState();
-          openPairing('Your session ended. Enter the code shown on your Mac.');
+          stopPreview(); await recoverSession(requestToken);
           return;
         }
         const message = ERROR_MESSAGES[data.error] || 'Screen preview is unavailable. Try again.';
@@ -621,6 +845,20 @@
       $('#preview-state').textContent = 'Tap Play to start video.';
     }
   }
+  function catchUpLive(session) {
+    if (!liveCurrent(session) || liveVideo.paused || liveVideo.seeking) return;
+    try {
+      // Resuming a live remote should show recent input, rather than replay a pause.
+      // Hls.js also bounds drift during playback; native HLS needs the same guard.
+      const ranges = liveVideo.seekable;
+      if (!ranges?.length) return;
+      const start = ranges.start(ranges.length - 1);
+      const edge = ranges.end(ranges.length - 1);
+      if (!Number.isFinite(edge) || edge - liveVideo.currentTime <= 4) return;
+      const target = session.hls?.liveSyncPosition ?? edge - 2;
+      if (Number.isFinite(target) && target > liveVideo.currentTime && target >= start && target < edge) liveVideo.currentTime = target;
+    } catch { /* Seekable ranges can change while a playlist is being refreshed. */ }
+  }
   function attachLivePlayer(session, playlist) {
     if (!liveCurrent(session) || session.playlist === playlist) return;
     if (session.playlist) { stopLive('The video session changed. Start again.'); return; }
@@ -631,6 +869,10 @@
     $('#preview-state').textContent = 'Connecting video…';
     $('#preview-captured').textContent = 'Continuous stream · no audio';
     function listen(event, listener) { liveVideo.addEventListener(event, listener); session.listeners.push([event, listener]); }
+    listen('play', () => catchUpLive(session));
+    for (const event of ['timeupdate', 'progress']) listen(event, () => {
+      if (!session.hls) catchUpLive(session);
+    });
     listen('playing', () => {
       if (!liveCurrent(session) || liveVideo.paused || liveVideo.readyState < 2) return;
       session.playing = true;
@@ -652,7 +894,11 @@
       stopLive('Video could not play. Try starting again.');
     });
     if (window.Hls?.isSupported()) {
-      const hls = new window.Hls({ enableWorker: false, lowLatencyMode: false, liveSyncDurationCount: 3, maxBufferLength: 6 });
+      const hls = new window.Hls({
+        enableWorker: false, lowLatencyMode: false,
+        liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 4,
+        liveSyncOnStallIncrease: 0.25, maxBufferLength: 6, backBufferLength: 6,
+      });
       session.hls = hls;
       hls.on(window.Hls.Events.MANIFEST_PARSED, () => { if (liveCurrent(session)) playLive(session); });
       hls.on(window.Hls.Events.ERROR, (_event, data) => {
@@ -931,7 +1177,7 @@
     if (!wallpaperModes.includes(mode) || wallpaperBusy) return;
     wallpaperChoice = mode;
     for (const button of wallpaperButtons) button.setAttribute('aria-pressed', String(button.dataset.wallpaper === mode));
-    $('#wallpaper-state').textContent = `Choice: ${mode[0].toUpperCase()}${mode.slice(1)}`;
+    $('#wallpaper-state').textContent = `Choice: ${wallpaperLabels[mode]}`;
   }
   for (const button of wallpaperButtons) button.addEventListener('click', () => selectWallpaper(button.dataset.wallpaper));
   $('#wallpaper-button').addEventListener('click', () => { wallpaperIntent++; openSheet($('#wallpaper-dialog')); selectWallpaper(wallpaperChoice); renderToolsState(); });
@@ -951,7 +1197,7 @@
     wallpaperBusy = false;
     renderToolsState();
     if (intent !== wallpaperIntent || !$('#wallpaper-dialog').open) return;
-    if (sent) toast(`${mode[0].toUpperCase()}${mode.slice(1)} applied. Changes appear on Home.`);
+    if (sent) toast(`${wallpaperLabels[mode]} applied. Changes appear on Home.`);
     else if (!reported) toast('Wallpaper was not sent. Reconnect Fire TV and try again.');
   });
   document.addEventListener('visibilitychange', () => {
@@ -1001,7 +1247,8 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden) invalidateCommands(); else refreshStatus(); });
   window.addEventListener('online', refreshStatus);
   window.addEventListener('offline', () => { serverAvailable = false; setConnection(false); invalidateCommands(); });
+  renderHaptics();
   renderState();
-  if (token) refreshStatus();
+  if (token || remembered) refreshStatus();
   setInterval(refreshStatus, POLL_MS);
 })();

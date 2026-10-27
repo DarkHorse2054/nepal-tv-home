@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Theater</string>
+    <string name="silk_required">Amazon Silk is required</string>
+    <string name="silk_required_message">Install or enable Amazon Silk on this Fire TV, then open frameXTV again.</string>
+    <string name="close">Close</string>
+</resources>

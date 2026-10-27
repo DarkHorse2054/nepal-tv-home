@@ -1,0 +1,26 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'app.nepal.framextv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'app.nepal.framextv'
+        minSdk 25
+        targetSdk 29
+        versionCode 5
+        versionName '2.2.1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        // This sideloaded TV app is not a Google Play publication.
+        disable 'ExpiredTargetSdkVersion'
+    }
+}

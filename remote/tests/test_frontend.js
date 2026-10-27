@@ -48,6 +48,7 @@ class Element extends EventTarget {
     this.id = attributes.id || '';
     this.value = attributes.value || '';
     this.disabled = Object.hasOwn(attributes, 'disabled');
+    this.checked = Object.hasOwn(attributes, 'checked');
     this.hidden = Object.hasOwn(attributes, 'hidden');
     this.open = Object.hasOwn(attributes, 'open');
     this.isContentEditable = false;
@@ -107,6 +108,9 @@ class Video extends Element {
     this.playCalls = this.pauseCalls = this.loadCalls = 0;
     this.nativeHls = true;
     this.playError = null;
+    this.currentTime = 0;
+    this.seeking = false;
+    this.seekable = { length: 0 };
   }
   get src() { return this.getAttribute('src') || ''; }
   set src(value) { this.setAttribute('src', value); }
@@ -220,6 +224,7 @@ function harness(fixtures = {}) {
   const createdUrls = [];
   const revokedUrls = [];
   const warnings = [];
+  const vibrations = [];
   const status = { online: true, device: { name: 'Test Fire TV' }, date: {}, samsung: { enabled: true, paired: true } };
   const livePlaylist = '/api/live/0123456789abcdef0123456789abcdef/index.m3u8';
   const video = document.querySelector('#live-video');
@@ -250,8 +255,15 @@ function harness(fixtures = {}) {
       return pending.promise;
     }
     if (url === '/api/preview/frame') return Promise.resolve(previewResponse(fixtures.preview));
+    if (url === '/api/session/resume') return Promise.resolve(fixtures.resume
+      ? response(fixtures.resume, fixtures.resumeStatus || 200)
+      : response({ error: 'trusted_device_missing' }, 401));
+    if (url === '/api/session/pair') return Promise.resolve(response(fixtures.pair || {
+      token: 'p'.repeat(43), remembered: request.body.remember, expiresIn: 28800,
+    }));
     const defaults = {
       '/api/status': status,
+      '/api/theater': { ok: true, state: 'request_sent' },
       '/api/device': fixtures.device || deviceFixture(),
       '/api/weather': fixtures.weather || weatherFixture(),
       '/api/live/start': fixtures.liveStart || { state: 'starting', playlist: livePlaylist, videoOnly: true },
@@ -261,13 +273,21 @@ function harness(fixtures = {}) {
     };
     return Promise.resolve(response(defaults[url] || { ok: true, state: 'sent' }));
   };
-  window.matchMedia = () => ({ matches: false });
+  window.matchMedia = () => ({ matches: fixtures.reducedMotion === true });
   const session = new Map(fixtures.paired === false ? [] : [['nepal.remote.session', 'unit-test-token']]);
+  const local = new Map(fixtures.remembered ? [['nepal.remote.remembered', '1']] : []);
+  if (fixtures.hapticsPreference !== undefined) local.set('nepal.remote.haptics', fixtures.hapticsPreference);
+  const navigator = fixtures.haptics ? { vibrate(duration) {
+    vibrations.push({ duration, at: clock.now });
+    if (fixtures.vibrationThrows) throw new Error('Vibration denied');
+    return fixtures.vibrationResult !== false;
+  } } : {};
   const context = vm.createContext({
     document, window, HTMLElement: Element, HTMLButtonElement: Button, fetch,
     console: { warn: (...values) => warnings.push(values) },
     sessionStorage: { getItem: key => session.get(key), setItem: (key, value) => session.set(key, value), removeItem: key => session.delete(key) },
-    navigator: {}, AbortController, Uint8Array, URL: { createObjectURL: () => { const url = `blob:test-${createdUrls.length}`; createdUrls.push(url); return url; }, revokeObjectURL: url => revokedUrls.push(url) }, performance: { now: () => clock.now },
+    localStorage: { getItem: key => local.get(key), setItem: (key, value) => local.set(key, value), removeItem: key => local.delete(key) },
+    navigator, AbortController, Uint8Array, URL: { createObjectURL: () => { const url = `blob:test-${createdUrls.length}`; createdUrls.push(url); return url; }, revokeObjectURL: url => revokedUrls.push(url) }, performance: { now: () => clock.now },
     setTimeout: clock.setTimeout.bind(clock), clearTimeout: clock.clear.bind(clock),
     setInterval: clock.setInterval.bind(clock), clearInterval: clock.clear.bind(clock),
   });
@@ -306,11 +326,95 @@ function harness(fixtures = {}) {
     deferred.push(pending);
     return pending;
   }
-  return { document, window, clock, requests, createdUrls, revokedUrls, warnings, players, livePlaylist, get, click, pointer, tap, key, enterText, defer,
+  return { document, window, clock, requests, createdUrls, revokedUrls, warnings, vibrations, players, livePlaylist, session, local, get, click, pointer, tap, key, enterText, defer,
     calls: url => requests.filter(request => request.url === url) };
 }
 
 function openSnapshots(ui) { ui.click('#preview-button'); ui.click('[data-view-mode="snapshots"]'); }
+
+test('remote press haptics are immediate and do not repeat on hold, compatibility click or response', async () => {
+  const ui = harness({ haptics: true }); await flush();
+  assert.equal(ui.vibrations.length, 0, 'Opening and checking status stay quiet');
+  const request = ui.defer('/api/key'); const up = ui.get('[data-key="up"]');
+  ui.pointer('pointerdown', up);
+  assert.deepEqual(ui.vibrations, [{ duration: 8, at: 0 }]);
+  assert.equal(ui.calls('/api/key').length, 0, 'The pulse happens before awaiting network work');
+  await flush(); request.resolve(); await flush(); await ui.clock.advance(850);
+  assert.ok(ui.calls('/api/key').length > 1, 'The held button still repeats controls');
+  ui.pointer('pointerup', up); up.dispatch('click', { detail: 1 }); await flush();
+  assert.equal(ui.vibrations.length, 1);
+  ui.tap('[data-key="up"]'); await flush();
+  assert.equal(ui.vibrations.length, 2, 'A new deliberate press gets its own pulse');
+});
+
+test('Samsung presses pulse before network work and busy presses stay quiet', async () => {
+  const ui = harness({ haptics: true }); await flush();
+  const request = ui.defer('/api/samsung/key');
+  ui.click('[data-samsung="volume_up"]');
+  assert.equal(ui.vibrations.length, 1);
+  ui.get('[data-samsung="volume_down"]').dispatch('click');
+  assert.equal(ui.vibrations.length, 1);
+  await flush(); request.resolve({ state: 'sent' }); await flush();
+  assert.equal(ui.vibrations.length, 1);
+  assert.equal(ui.calls('/api/samsung/key').length, 1);
+});
+
+test('haptic preference persists, enabling previews once and disabling stays quiet', async () => {
+  const ui = harness({ haptics: true, hapticsPreference: '0' }); await flush();
+  assert.equal(ui.get('#haptics-toggle').checked, false);
+  assert.equal(ui.get('#haptics-test').disabled, true);
+  ui.click('[data-key="home"]'); await flush(); assert.equal(ui.vibrations.length, 0);
+  ui.get('#haptics-toggle').checked = true; ui.get('#haptics-toggle').dispatch('change');
+  assert.equal(ui.local.get('nepal.remote.haptics'), '1');
+  assert.equal(ui.vibrations.length, 1);
+  ui.click('#haptics-test'); assert.equal(ui.vibrations.length, 2);
+  assert.equal(ui.calls('/api/key').length, 1, 'Testing haptics sends no TV control');
+  ui.get('#haptics-toggle').checked = false; ui.get('#haptics-toggle').dispatch('change');
+  ui.click('[data-key="home"]'); await flush();
+  assert.equal(ui.local.get('nepal.remote.haptics'), '0');
+  assert.equal(ui.vibrations.length, 2);
+  const reopened = harness({ haptics: true, hapticsPreference: ui.local.get('nepal.remote.haptics') }); await flush();
+  assert.equal(reopened.get('#haptics-toggle').checked, false);
+});
+
+test('reduced motion defaults haptics off and an explicit preference can enable them', async () => {
+  const ui = harness({ haptics: true, reducedMotion: true }); await flush();
+  assert.equal(ui.get('#haptics-toggle').checked, false);
+  ui.tap('[data-key="up"]'); await flush(); assert.equal(ui.vibrations.length, 0);
+  ui.get('#haptics-toggle').checked = true; ui.get('#haptics-toggle').dispatch('change');
+  ui.tap('[data-key="up"]'); await flush(); assert.equal(ui.vibrations.length, 2);
+  const reopened = harness({ haptics: true, reducedMotion: true, hapticsPreference: '1' }); await flush();
+  assert.equal(reopened.get('#haptics-toggle').checked, true);
+});
+
+test('unsupported, hidden and offline controls never produce haptics', async () => {
+  const unsupported = harness(); await flush();
+  assert.equal(unsupported.get('#haptics-toggle').disabled, true);
+  assert.equal(unsupported.get('#haptics-test').disabled, true);
+  assert.match(unsupported.get('#haptics-help').textContent, /doesn’t support/);
+  unsupported.click('[data-key="home"]'); await flush(); assert.equal(unsupported.calls('/api/key').length, 1);
+  const ui = harness({ haptics: true }); await flush();
+  ui.document.hidden = true; ui.document.dispatch('visibilitychange');
+  ui.get('[data-key="home"]').dispatch('click');
+  ui.get('[data-samsung="volume_up"]').dispatch('click'); await flush();
+  assert.equal(ui.vibrations.length, 0);
+  ui.document.hidden = false; ui.window.dispatch('offline');
+  ui.get('[data-key="home"]').dispatch('click');
+  ui.get('[data-samsung="volume_up"]').dispatch('click'); await flush();
+  assert.equal(ui.vibrations.length, 0);
+});
+
+test('blocked or throwing vibration never interrupts or retries TV commands', async t => {
+  for (const fixture of [{ vibrationThrows: true }, { vibrationResult: false }]) await t.test(JSON.stringify(fixture), async () => {
+    const ui = harness({ haptics: true, ...fixture }); await flush();
+    ui.click('[data-key="home"]'); await flush();
+    ui.click('[data-samsung="volume_up"]'); await flush();
+    assert.equal(ui.calls('/api/key').length, 1); assert.equal(ui.calls('/api/samsung/key').length, 1);
+    ui.click('#settings-button'); ui.click('#haptics-test');
+    assert.match(ui.get('#settings-dialog').textContent, /Haptics are unavailable/);
+    assert.equal(ui.calls('/api/key').length, 1); assert.equal(ui.calls('/api/samsung/key').length, 1);
+  });
+});
 
 test('two deliberate rapid arrow taps both send while the first request is pending', async () => {
   const ui = harness(); await flush();
@@ -349,6 +453,18 @@ test('unsent taps are discarded after blur or their queue deadline', async t => 
     first.resolve(); await flush();
     assert.deepEqual(ui.calls('/api/key').map(request => request.body.key), ['up']);
   });
+});
+
+test('uncertain fast-key sends stop held repeats and never replay the action', async () => {
+  const ui = harness(); await flush();
+  const pending = ui.defer('/api/key');
+  ui.pointer('pointerdown', ui.get('[data-key="right"]'));
+  await flush(); await ui.clock.advance(500);
+  pending.resolve({ error: 'key_send_uncertain' }, 503); await flush();
+  await ui.clock.advance(2000);
+  assert.equal(ui.calls('/api/key').length, 1);
+  assert.match(ui.get('#toast').textContent, /may have reached the TV/);
+  assert.equal(ui.get('[data-key="right"]').classList.contains('is-pressed'), false);
 });
 
 test('H and M work with button focus while Enter and summary activation stay native', async () => {
@@ -654,7 +770,7 @@ test('weather refresh failures remain explicit and do not manufacture fresh cond
 test('wallpaper sends only the chosen fixed mode on Apply and never claims current readback', async () => {
   const ui = harness(); await flush();
   const modes = ui.document.querySelectorAll('[data-wallpaper]').map(button => button.dataset.wallpaper);
-  assert.deepEqual(modes, ['auto', 'morning', 'dusk', 'night']);
+  assert.deepEqual(modes, ['auto', 'morning', 'dusk', 'night', 'annapurna', 'pashupati']);
   ui.click('#wallpaper-button'); await flush();
   assert.equal(ui.get('#wallpaper-dialog').open, true);
   assert.equal(ui.calls('/api/wallpaper').length, 0, 'Opening the sheet must never change the TV');
@@ -722,6 +838,17 @@ test('Open ESPN launches the installed app explicitly and disables while Fire TV
   assert.equal(ui.calls('/api/app').length, 1);
   const dockApps = ui.document.querySelectorAll('[data-app]').filter(button => button.closest('.app-dock')).map(button => button.dataset.app);
   assert.deepEqual(dockApps, ['netflix', 'youtube', 'disney', 'paramount', 'hulu', 'npl']);
+});
+
+test('Theater Settings shortcut sends its fixed app alias once and follows TV availability', async () => {
+  const ui = harness(); await flush(); ui.click('#settings-button');
+  assert.equal(ui.get('#framextv-button').textContent, 'Open Theater');
+  ui.click('#framextv-button'); await flush();
+  assert.deepEqual(ui.calls('/api/app').map(request => request.body), [{ app: 'framextv' }]);
+  assert.equal(ui.get('#settings-dialog').open, true);
+  ui.window.dispatch('offline');
+  assert.equal(ui.get('#framextv-button').disabled, true);
+  assert.equal(ui.calls('/api/app').length, 1);
 });
 
 
@@ -932,7 +1059,11 @@ test('Chromium uses the local HLS player with bounded buffers and destroys it on
   ui.click('#preview-button'); ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
   assert.equal(ui.players.length, 1);
   const player = ui.players[0];
-  assert.deepEqual(JSON.parse(JSON.stringify(player.config)), { enableWorker: false, lowLatencyMode: false, liveSyncDurationCount: 3, maxBufferLength: 6 });
+  assert.deepEqual(JSON.parse(JSON.stringify(player.config)), {
+    enableWorker: false, lowLatencyMode: false,
+    liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 4,
+    liveSyncOnStallIncrease: 0.25, maxBufferLength: 6, backBufferLength: 6,
+  });
   assert.equal(player.source, ui.livePlaylist);
   assert.equal(player.media, ui.get('#live-video'));
   assert.equal(ui.get('#live-video').playCalls, 0);
@@ -968,6 +1099,47 @@ test('native HLS remains the fallback when MSE HLS is unavailable', async () => 
   assert.equal(ui.players.length, 0);
   assert.equal(ui.get('#live-video').src, ui.livePlaylist);
   assert.equal(ui.get('#live-video').playCalls, 1);
+});
+
+test('resuming delayed live playback catches up for Hls.js and native HLS', async t => {
+  for (const hls of [false, true]) await t.test(hls ? 'Hls.js' : 'native', async () => {
+    const ui = harness({ hls }); await flush();
+    ui.click('#preview-button'); ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+    const video = ui.get('#live-video');
+    if (hls) { ui.players[0].emit('manifest'); await flush(); ui.players[0].liveSyncPosition = 19; }
+    video.seekable = { length: 1, start: () => 10, end: () => 20 };
+    video.currentTime = 11;
+    video.paused = true;
+    video.dispatch('progress');
+    assert.equal(video.currentTime, 11, 'A deliberate pause remains paused');
+    video.paused = false;
+    video.dispatch('play');
+    assert.equal(video.currentTime, hls ? 19 : 18);
+    ui.click('#preview-toggle'); await flush();
+    video.currentTime = 11; video.paused = false;
+    video.dispatch('play'); video.dispatch('progress');
+    assert.equal(video.currentTime, 11, 'Stopped sessions have no catch-up listeners');
+  });
+});
+
+test('native HLS bounds playback drift without seeking healthy or user-seeking video', async () => {
+  const ui = harness(); await flush();
+  ui.click('#preview-button'); ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  const video = ui.get('#live-video');
+  video.dispatch('timeupdate'); // No seekable range during startup.
+  video.seekable = { length: 1, start: () => 10, end: () => 20 };
+  video.currentTime = 17;
+  video.dispatch('timeupdate');
+  assert.equal(video.currentTime, 17);
+  video.currentTime = 11; video.seeking = true;
+  video.dispatch('progress');
+  assert.equal(video.currentTime, 11);
+  video.seeking = false; video.dispatch('timeupdate');
+  assert.equal(video.currentTime, 18);
+  video.currentTime = 11;
+  video.seekable = { length: 1, start: () => { throw new Error('Range changed'); } };
+  assert.doesNotThrow(() => video.dispatch('progress'));
+  assert.equal(ui.calls('/api/live/stop').length, 0, 'A changing range must not end video');
 });
 
 test('closing, hiding, leaving, losing connection or switching modes stops continuous video', async t => {
@@ -1034,7 +1206,7 @@ test('late cleanup uses its captured owner token and cannot expire a newly paire
   ui.click('#preview-toggle'); await flush();
   ui.get('#preview-dialog').close(); await flush();
   ui.click('#pairing-button');
-  const pair = ui.defer('/api/pair');
+  const pair = ui.defer('/api/session/pair');
   ui.get('#pair-pin').value = '123456'; ui.get('#pair-form').dispatch('submit'); await flush();
   pair.resolve({ token: 'new-session-token' }); await flush();
   assert.equal(ui.get('#pair-dialog').open, false);
@@ -1045,6 +1217,154 @@ test('late cleanup uses its captured owner token and cannot expire a newly paire
   assert.equal(ui.get('#live-video').playCalls, 0);
   ui.click('[data-key="home"]'); await flush();
   assert.equal(ui.calls('/api/key')[0].options.headers.Authorization, 'Bearer new-session-token');
+});
+
+test('remembered browsers restore a session on open without PIN, controls or capture', async () => {
+  const restored = 'r'.repeat(43);
+  const ui = harness({ paired: false, remembered: true, resume: { token: restored, remembered: true } });
+  await flush(); await ui.clock.advance(0);
+  assert.equal(ui.calls('/api/session/resume').length, 1);
+  assert.deepEqual(ui.calls('/api/session/resume')[0].body, {});
+  assert.equal(ui.calls('/api/session/resume')[0].options.headers.Authorization, undefined);
+  assert.equal(ui.session.get('nepal.remote.session'), restored);
+  assert.equal(ui.local.get('nepal.remote.remembered'), '1');
+  assert.equal(ui.get('[data-key="home"]').disabled, false);
+  assert.equal(ui.get('#pair-dialog').open, false);
+  for (const route of ['/api/session/pair', '/api/key', '/api/reconnect', '/api/preview/frame', '/api/live/start']) assert.equal(ui.calls(route).length, 0, route);
+});
+
+test('pairing remembers by default and stores only a non-secret local flag', async t => {
+  for (const remember of [true, false]) await t.test(String(remember), async () => {
+    const ui = harness({ paired: false }); await flush();
+    assert.equal(ui.get('#pair-remember').checked, true);
+    ui.click('#connection-button'); ui.get('#pair-remember').checked = remember;
+    ui.get('#pair-pin').value = '123456'; ui.get('#pair-form').dispatch('submit'); await flush();
+    assert.deepEqual(ui.calls('/api/session/pair')[0].body, { pin: '123456', remember });
+    assert.equal(ui.local.get('nepal.remote.remembered'), remember ? '1' : undefined);
+    assert.deepEqual([...ui.local.values()], remember ? ['1'] : []);
+    assert.equal(ui.get('#pair-dialog').open, false);
+    assert.equal(ui.get('#forget-device').hidden, false);
+  });
+});
+
+test('expired access restores once, discards queued inputs and never replays a failed key', async () => {
+  const restored = 'r'.repeat(43);
+  const ui = harness({ remembered: true, resume: { token: restored, remembered: true } }); await flush();
+  const key = ui.defer('/api/key');
+  ui.tap('[data-key="up"]'); await flush();
+  ui.click('[data-key="home"]');
+  key.resolve({ error: 'session_expired' }, 401); await flush(); await ui.clock.advance(0);
+  assert.equal(ui.calls('/api/session/resume').length, 1);
+  assert.equal(ui.calls('/api/key').length, 1);
+  assert.equal(ui.get('#pair-dialog').open, false);
+  ui.click('[data-key="home"]'); await flush();
+  assert.equal(ui.calls('/api/key').length, 2);
+  assert.equal(ui.calls('/api/key')[1].options.headers.Authorization, `Bearer ${restored}`);
+});
+
+test('concurrent expired requests share one restoration', async () => {
+  const ui = harness({ remembered: true }); await flush();
+  const status = ui.defer('/api/status'); const key = ui.defer('/api/key'); const resume = ui.defer('/api/session/resume');
+  await ui.clock.advance(6000); ui.tap('[data-key="up"]'); await flush();
+  key.resolve({ error: 'session_expired' }, 401); await flush();
+  status.resolve({ error: 'session_expired' }, 401); await flush();
+  assert.equal(ui.calls('/api/session/resume').length, 1);
+  resume.resolve({ token: 'r'.repeat(43), remembered: true }); await flush(); await ui.clock.advance(0);
+  assert.equal(ui.get('[data-key="home"]').disabled, false);
+  assert.equal(ui.calls('/api/key').length, 1);
+});
+
+test('expired saved pairing clears the hint and asks for PIN without retrying controls', async () => {
+  const ui = harness({ remembered: true }); await flush();
+  const key = ui.defer('/api/key'); ui.click('[data-key="home"]'); await flush();
+  key.resolve({ error: 'session_expired' }, 401); await flush();
+  assert.equal(ui.local.has('nepal.remote.remembered'), false);
+  assert.equal(ui.session.has('nepal.remote.session'), false);
+  assert.equal(ui.get('#pair-dialog').open, true);
+  await ui.clock.advance(30000);
+  assert.equal(ui.calls('/api/session/resume').length, 1);
+  assert.equal(ui.calls('/api/key').length, 1);
+});
+
+test('unavailable saved pairing keeps its hint and reconnect can retry', async () => {
+  const ui = harness({ remembered: true }); await flush();
+  const key = ui.defer('/api/key'); const resume = ui.defer('/api/session/resume');
+  ui.click('[data-key="home"]'); await flush(); key.resolve({ error: 'session_expired' }, 401); await flush();
+  resume.reject(new TypeError('Offline')); await flush();
+  assert.equal(ui.local.get('nepal.remote.remembered'), '1');
+  assert.equal(ui.get('#mac-status').textContent, 'Unavailable');
+  assert.equal(ui.get('#pair-dialog').open, false);
+  const retry = ui.defer('/api/session/resume'); ui.click('#reconnect-button'); await flush();
+  retry.resolve({ token: 'r'.repeat(43), remembered: true }); await flush(); await ui.clock.advance(0);
+  assert.equal(ui.get('#mac-status').textContent, 'Available');
+  assert.equal(ui.get('[data-key="home"]').disabled, false);
+});
+
+test('forget revokes before clearing saved state and keeps controls disabled during the request', async () => {
+  const ui = harness({ remembered: true }); await flush(); ui.click('#settings-button');
+  const forget = ui.defer('/api/session/forget'); ui.click('#forget-device'); await flush();
+  assert.equal(ui.get('[data-key="home"]').disabled, true);
+  assert.equal(ui.get('#forget-device').disabled, true);
+  assert.equal(ui.local.get('nepal.remote.remembered'), '1');
+  forget.resolve({ ok: true }); await flush(); await ui.clock.advance(30000);
+  assert.equal(ui.calls('/api/session/forget')[0].options.headers.Authorization, 'Bearer unit-test-token');
+  assert.equal(ui.local.size, 0); assert.equal(ui.session.size, 0);
+  assert.equal(ui.get('#settings-dialog').open, false);
+  assert.equal(ui.get('#pair-dialog').open, true);
+  assert.match(ui.get('#pair-error').textContent, /forgotten/);
+  assert.equal(ui.calls('/api/session/resume').length, 0);
+  assert.equal(ui.calls('/api/key').length, 0);
+});
+
+test('failed durable forget keeps credentials and does not claim successful revocation', async () => {
+  const ui = harness({ remembered: true }); await flush(); ui.click('#settings-button');
+  const forget = ui.defer('/api/session/forget'); ui.click('#forget-device'); await flush();
+  forget.resolve({ error: 'trusted_device_storage_unavailable' }, 503); await flush();
+  assert.equal(ui.local.get('nepal.remote.remembered'), '1');
+  assert.equal(ui.session.get('nepal.remote.session'), 'unit-test-token');
+  assert.equal(ui.get('#settings-dialog').open, true);
+  assert.equal(ui.get('#pair-dialog').open, false);
+  assert.equal(ui.get('#forget-device').disabled, false);
+  assert.doesNotMatch(ui.get('#toast').textContent, /was forgotten/);
+});
+
+test('forget with expired access restores pairing and requires a fresh deliberate forget', async () => {
+  const ui = harness({ remembered: true, resume: { token: 'r'.repeat(43), remembered: true } }); await flush();
+  ui.click('#settings-button'); const forget = ui.defer('/api/session/forget');
+  ui.click('#forget-device'); await flush(); forget.resolve({ error: 'session_expired' }, 401);
+  await flush(); await ui.clock.advance(0);
+  assert.equal(ui.calls('/api/session/forget').length, 1);
+  assert.equal(ui.local.get('nepal.remote.remembered'), '1');
+  assert.equal(ui.session.get('nepal.remote.session'), 'r'.repeat(43));
+  assert.match(ui.get('#settings-dialog').textContent, /Tap Forget this device again/);
+  ui.click('#forget-device'); await flush();
+  assert.equal(ui.calls('/api/session/forget').length, 2);
+  assert.equal(ui.local.size, 0); assert.equal(ui.session.size, 0);
+});
+
+test('late restoration cannot replace a newer manual pairing', async () => {
+  const ui = harness({ remembered: true }); await flush();
+  const key = ui.defer('/api/key'); const resume = ui.defer('/api/session/resume');
+  ui.click('[data-key="home"]'); await flush(); key.resolve({ error: 'session_expired' }, 401); await flush();
+  ui.click('#pairing-button'); ui.get('#pair-pin').value = '123456'; ui.get('#pair-form').dispatch('submit'); await flush();
+  assert.equal(ui.session.get('nepal.remote.session'), 'p'.repeat(43));
+  resume.resolve({ token: 'r'.repeat(43), remembered: true }); await flush(); await ui.clock.advance(0);
+  assert.equal(ui.session.get('nepal.remote.session'), 'p'.repeat(43));
+  assert.equal(ui.get('#pair-dialog').open, false);
+  assert.equal(ui.get('[data-key="home"]').disabled, false);
+});
+
+test('restoring expired video access stops capture and never resumes video automatically', async () => {
+  const ui = harness({ remembered: true, resume: { token: 'r'.repeat(43), remembered: true } }); await flush();
+  ui.click('#preview-button'); const status = ui.defer('/api/live/status');
+  ui.click('#preview-toggle'); await flush(); await ui.clock.advance(1200);
+  status.resolve({ error: 'session_expired' }, 401); await flush(); await ui.clock.advance(30000);
+  assert.equal(ui.get('#pair-dialog').open, false);
+  assert.equal(ui.get('#live-video').hidden, true);
+  assert.equal(ui.calls('/api/live/start').length, 1);
+  assert.equal(ui.calls('/api/live/stop').length, 1);
+  assert.equal(ui.calls('/api/preview/frame').length, 0);
+  assert.equal(ui.get('[data-key="home"]').disabled, false);
 });
 
 test('Live status failures clear video and do not retry or mislabel the whole Mac offline', async () => {
@@ -1125,4 +1445,215 @@ test('native and fatal HLS diagnostics include only their selected safe fields',
   assert.equal(hls.warnings.length, 1);
   assert.deepEqual(hls.warnings[0], ['Nepal Remote: fatal HLS error', JSON.stringify({ type: 'networkError', details: 'manifestLoadError', responseCode: 401 })]);
   assert.equal(hls.players[0].destroyed, true);
+});
+
+
+function enterTheater(ui, value) {
+  const input = ui.get('#theater-request');
+  assert.equal(input.disabled, false, 'Theater requests must be editable before changing a draft');
+  input.value = value;
+  input.dispatch('input');
+}
+
+test('Play on Theater is a visible paired action with a labeled, focused request field', async () => {
+  const ui = harness(); await flush();
+  const button = ui.get('#theater-button');
+  assert.equal(button.closest('#settings-dialog'), null);
+  assert.equal(button.getAttribute('aria-controls'), 'theater-dialog');
+  ui.click(button);
+  assert.equal(ui.get('#theater-dialog').open, true);
+  assert.equal(ui.document.activeElement, ui.get('#theater-request'));
+  assert.equal(ui.get('#theater-submit').disabled, true);
+  assert.match(ui.get('#theater-dialog').textContent, /phone keyboard’s microphone/);
+  assert.match(ui.get('#theater-examples').textContent, /Breaking Bad s2e3/);
+  assert.equal(ui.calls('/api/theater').length, 0);
+});
+
+test('Theater actions require pairing, a reachable Mac and an online Fire TV', async () => {
+  const unpaired = harness({ paired: false }); await flush();
+  assert.equal(unpaired.get('#theater-button').disabled, true);
+  unpaired.get('#theater-button').dispatch('click');
+  assert.equal(unpaired.get('#theater-dialog').open, false);
+  enterTheater(unpaired, 'play Inception');
+  unpaired.get('#theater-form').dispatch('submit'); await flush();
+  assert.equal(unpaired.calls('/api/theater').length, 0);
+
+  const ui = harness(); await flush(); ui.click('#theater-button');
+  enterTheater(ui, 'play Inception');
+  ui.window.dispatch('offline');
+  assert.equal(ui.get('#theater-button').disabled, true);
+  assert.equal(ui.get('#theater-submit').disabled, true);
+  assert.match(ui.get('#theater-state').textContent, /Mac is unavailable/);
+  ui.get('#theater-form').dispatch('submit'); await flush();
+  assert.equal(ui.calls('/api/theater').length, 0);
+
+  const tvOffline = harness(); await flush();
+  const status = tvOffline.defer('/api/status');
+  await tvOffline.clock.advance(6000);
+  status.resolve({ online: false, samsung: { enabled: true, paired: true } }); await flush();
+  assert.equal(tvOffline.get('#theater-button').disabled, true);
+  tvOffline.get('#theater-button').dispatch('click');
+  assert.equal(tvOffline.calls('/api/theater').length, 0);
+});
+
+test('Theater sends one trimmed request, locks duplicate submits and confirms delivery without claiming playback', async () => {
+  const ui = harness(); await flush(); ui.click('#theater-button');
+  enterTheater(ui, '  play Inception (2010)  ');
+  const pending = ui.defer('/api/theater');
+  ui.get('#theater-form').dispatch('submit');
+  ui.get('#theater-form').dispatch('submit'); await flush();
+  assert.equal(ui.get('#theater-request').disabled, true);
+  assert.equal(ui.get('#theater-submit').disabled, true);
+  assert.deepEqual(ui.calls('/api/theater').map(request => request.body), [{ request: 'play Inception (2010)' }]);
+  pending.resolve({ ok: true, state: 'request_sent' }); await flush();
+  assert.equal(ui.get('#theater-request').value, '');
+  assert.equal(ui.get('#theater-request').disabled, false);
+  assert.equal(ui.get('#theater-dialog-notice').textContent, 'Request sent to Theater. Check the TV.');
+  assert.equal(ui.get('#theater-dialog-notice').hidden, false);
+  assert.equal(ui.calls('/api/theater').length, 1);
+  assert.equal([...ui.local.values()].some(value => String(value).includes('Inception')), false);
+  assert.equal([...ui.session.values()].some(value => String(value).includes('Inception')), false);
+  assert.equal(ui.warnings.length, 0);
+});
+
+test('Theater validates Unicode codepoint bounds and rejects empty, control or incomplete text', async t => {
+  for (const value of ['', '  ', 'x'.repeat(161), 'play\nInception', 'play\tInception', 'x\u0085y', '\uD800']) await t.test(JSON.stringify(value), async () => {
+    const ui = harness(); await flush(); ui.click('#theater-button'); enterTheater(ui, value);
+    assert.equal(ui.get('#theater-submit').disabled, true);
+    ui.get('#theater-form').dispatch('submit'); await flush();
+    assert.equal(ui.calls('/api/theater').length, 0);
+  });
+  const ui = harness(); await flush(); ui.click('#theater-button');
+  const value = '🎬'.repeat(160);
+  enterTheater(ui, value);
+  assert.equal(ui.get('#theater-count').textContent, '160 / 160');
+  assert.equal(ui.get('#theater-submit').disabled, false);
+  ui.get('#theater-form').dispatch('submit'); await flush();
+  assert.equal(ui.calls('/api/theater')[0].body.request, value);
+});
+
+test('uncertain Theater failure retains the draft and never retries automatically', async t => {
+  for (const outcome of ['uncertain', 'network', 'wrong-ack']) await t.test(outcome, async () => {
+    const ui = harness(); await flush(); ui.click('#theater-button');
+    enterTheater(ui, 'play Breaking Bad s2e3');
+    const pending = ui.defer('/api/theater');
+    ui.get('#theater-form').dispatch('submit'); await flush();
+    if (outcome === 'uncertain') pending.resolve({ error: 'theater_send_uncertain' }, 503);
+    else if (outcome === 'network') pending.reject(new Error('Disconnected'));
+    else pending.resolve({ ok: true, state: 'playing' });
+    await flush();
+    assert.equal(ui.get('#theater-request').value, 'play Breaking Bad s2e3');
+    assert.match(ui.get('#theater-error').textContent, /Check the TV before trying again/);
+    assert.equal(ui.get('#theater-dialog-notice').hidden, true);
+    assert.equal(ui.get('#theater-submit').disabled, false);
+    await ui.clock.advance(30000);
+    assert.equal(ui.calls('/api/theater').length, 1);
+  });
+});
+
+test('closing, hiding or leaving drops an unsent Theater request behind another control', async t => {
+  for (const reason of ['close', 'hidden', 'pagehide']) await t.test(reason, async () => {
+    const ui = harness(); await flush();
+    const blocking = ui.defer('/api/key');
+    ui.click('[data-key="home"]'); await flush();
+    ui.click('#theater-button'); enterTheater(ui, 'play Inception');
+    ui.get('#theater-form').dispatch('submit'); await flush();
+    assert.equal(ui.calls('/api/theater').length, 0);
+    if (reason === 'close') ui.get('#theater-dialog').close();
+    if (reason === 'hidden') { ui.document.hidden = true; ui.document.dispatch('visibilitychange'); }
+    if (reason === 'pagehide') ui.window.dispatch('pagehide');
+    blocking.resolve(); await flush();
+    assert.equal(ui.calls('/api/theater').length, 0);
+    ui.document.hidden = false; ui.document.dispatch('visibilitychange'); await flush();
+    await ui.clock.advance(6000);
+    assert.equal(ui.calls('/api/theater').length, 0, 'Returning cannot replay the old request');
+    if (reason === 'close' || reason === 'pagehide') assert.equal(ui.get('#theater-request').value, '');
+  });
+});
+
+test('a Theater request that expires in the input queue stays unsent and keeps its draft', async () => {
+  const ui = harness(); await flush();
+  const blocking = ui.defer('/api/key');
+  ui.click('[data-key="home"]'); await flush();
+  ui.click('#theater-button'); enterTheater(ui, 'play Inception');
+  ui.get('#theater-form').dispatch('submit'); await flush();
+  await ui.clock.advance(1201);
+  blocking.resolve(); await flush();
+  assert.equal(ui.calls('/api/theater').length, 0);
+  assert.equal(ui.get('#theater-request').value, 'play Inception');
+  assert.match(ui.get('#theater-error').textContent, /Request was not sent/);
+});
+
+test('late Theater outcomes cannot clear or report into a reopened newer draft', async t => {
+  for (const outcome of ['sent', 'uncertain']) await t.test(outcome, async () => {
+    const ui = harness(); await flush(); ui.click('#theater-button'); enterTheater(ui, 'old request');
+    const pending = ui.defer('/api/theater');
+    ui.get('#theater-form').dispatch('submit'); await flush();
+    ui.get('#theater-dialog').close();
+    ui.click('#theater-button'); enterTheater(ui, 'new request'); await flush();
+    if (outcome === 'sent') pending.resolve({ ok: true, state: 'request_sent' });
+    else pending.resolve({ error: 'theater_send_uncertain' }, 503);
+    await flush();
+    assert.equal(ui.get('#theater-request').value, 'new request');
+    assert.equal(ui.get('#theater-error').textContent, '');
+    assert.equal(ui.get('#theater-request').disabled, false);
+    assert.equal(ui.get('#theater-dialog-notice').hidden, true);
+    assert.equal(ui.calls('/api/theater').length, 1);
+  });
+});
+
+test('backgrounding an in-flight Theater request preserves the draft and requires a fresh press', async () => {
+  const ui = harness(); await flush(); ui.click('#theater-button'); enterTheater(ui, 'play Inception');
+  const pending = ui.defer('/api/theater');
+  ui.get('#theater-form').dispatch('submit'); await flush();
+  ui.document.hidden = true; ui.document.dispatch('visibilitychange'); await flush();
+  pending.resolve({ ok: true, state: 'request_sent' }); await flush();
+  ui.document.hidden = false; ui.document.dispatch('visibilitychange'); await flush();
+  assert.equal(ui.get('#theater-request').value, 'play Inception');
+  assert.match(ui.get('#theater-error').textContent, /Check the TV before trying again/);
+  assert.equal(ui.get('#theater-dialog-notice').hidden, true);
+  assert.equal(ui.calls('/api/theater').length, 1);
+});
+
+test('an old Theater 401 preserves a newly paired session and newer draft', async () => {
+  const ui = harness(); await flush(); ui.click('#theater-button'); enterTheater(ui, 'old request');
+  const pending = ui.defer('/api/theater');
+  ui.get('#theater-form').dispatch('submit'); await flush();
+  ui.get('#pair-pin').value = '123456';
+  ui.get('#pair-form').dispatch('submit'); await flush();
+  assert.equal(ui.session.get('nepal.remote.session'), 'p'.repeat(43));
+  enterTheater(ui, 'new request');
+  pending.resolve({ error: 'session_expired' }, 401); await flush();
+  assert.equal(ui.session.get('nepal.remote.session'), 'p'.repeat(43));
+  assert.equal(ui.get('#pair-dialog').open, false);
+  assert.equal(ui.get('#theater-request').value, 'new request');
+  assert.equal(ui.get('#theater-error').textContent, '');
+  assert.equal(ui.calls('/api/theater').length, 1);
+});
+
+
+test('Theater allows time for waking Fire TV before its launch acknowledgement', async () => {
+  const ui = harness(); await flush(); ui.click('#theater-button');
+  enterTheater(ui, 'play Inception (2010)');
+  const pending = ui.defer('/api/theater');
+  ui.get('#theater-form').dispatch('submit'); await flush();
+  await ui.clock.advance(9000);
+  assert.equal(pending.request.options.signal.aborted, false);
+  assert.equal(ui.get('#theater-request').disabled, true);
+  pending.resolve({ ok: true, state: 'request_sent' }); await flush();
+  assert.equal(ui.get('#theater-request').value, '');
+  assert.equal(ui.calls('/api/theater').length, 1);
+});
+
+test('Theater wake and launch remain bounded without replaying a timed-out request', async () => {
+  const ui = harness(); await flush(); ui.click('#theater-button');
+  enterTheater(ui, 'play Inception (2010)');
+  const pending = ui.defer('/api/theater');
+  ui.get('#theater-form').dispatch('submit'); await flush();
+  await ui.clock.advance(12001);
+  assert.equal(pending.request.options.signal.aborted, true);
+  assert.equal(ui.get('#theater-request').value, 'play Inception (2010)');
+  assert.match(ui.get('#theater-error').textContent, /Check the TV before trying again/);
+  await ui.clock.advance(30000);
+  assert.equal(ui.calls('/api/theater').length, 1);
 });

@@ -273,6 +273,7 @@ h1 { margin: 0; font-size: 27px; font-weight: 450; letter-spacing: -.8px; line-h
 .connection-list > div > span:last-child { color: var(--muted); font-size: 13px; text-align: right; }
 .settings-section { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; }
 .settings-section h3 { margin: 0 0 8px; font-size: 16px; font-weight: 500; }
+.other-apps > button + button { margin-top: 12px; }
 #pairing-button { margin-top: 12px; }
 .text-actions { display: flex; gap: 12px; margin-top: 12px; }
 .text-actions > * { flex: 1; min-width: 0; font-size: 13px; }
@@ -281,10 +282,19 @@ h1 { margin: 0; font-size: 27px; font-weight: 450; letter-spacing: -.8px; line-h
 .keyboard-help summary { display: flex; align-items: center; min-height: 48px; cursor: pointer; }
 .keyboard-help p { margin: 0 0 16px; line-height: 1.8; }
 .sheet label { display: block; color: var(--ink); font-size: 14px; margin-bottom: 10px; }
-#pair-pin, #tv-text { width: 100%; color: var(--ink); background: #17201b; border: 1px solid rgb(225 236 227 / 29%); border-radius: 16px; caret-color: var(--gold); }
+#pair-pin, #tv-text, #theater-request { width: 100%; color: var(--ink); background: #17201b; border: 1px solid rgb(225 236 227 / 29%); border-radius: 16px; caret-color: var(--gold); }
 #pair-pin { min-height: 72px; font-size: 30px; letter-spacing: 12px; text-align: center; padding: 12px 0 12px 12px; font-variant-numeric: tabular-nums; }
-#tv-text { resize: vertical; min-height: 128px; max-height: 230px; padding: 16px; font-size: 17px; line-height: 1.6; }
-#pair-pin::placeholder, #tv-text::placeholder { color: var(--quiet); }
+.sheet .remember-choice { display: flex; align-items: center; gap: 12px; min-height: 48px; margin: 12px 0 0; cursor: pointer; line-height: 1.5; }
+.remember-choice input { width: 20px; height: 20px; flex: 0 0 20px; margin: 0; accent-color: var(--gold); }
+.forget-device { margin-top: 12px; color: var(--muted); }
+.sheet .haptics-choice { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; margin: 0; cursor: pointer; font-size: 16px; }
+.haptics-choice input { appearance: none; -webkit-appearance: none; flex: 0 0 46px; width: 46px; height: 28px; margin: 0; border-radius: 20px; border: 1px solid var(--line); background: var(--glass); position: relative; cursor: pointer; }
+.haptics-choice input::before { content: ''; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px; border-radius: 50%; background: var(--muted); }
+.haptics-choice input:checked { background: var(--gold); border-color: var(--gold); }
+.haptics-choice input:checked::before { transform: translateX(18px); background: var(--gold-ink); }
+.haptics-choice input:disabled { opacity: .4; cursor: default; }
+#tv-text, #theater-request { resize: vertical; min-height: 128px; max-height: 230px; padding: 16px; font-size: 17px; line-height: 1.6; }
+#pair-pin::placeholder, #tv-text::placeholder, #theater-request::placeholder { color: var(--quiet); }
 .input-caption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: var(--quiet); font-size: 12px; }
 .inline-error { color: var(--error); font-size: 13px; line-height: 1.6; min-height: 20px; margin: 12px 0; }
 .toast { position: fixed; z-index: 20; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translate(-50%, 8px); color: var(--ink); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 12px 35px rgb(0 0 0 / 30%); padding: 14px 18px; width: max-content; max-width: calc(100% - 32px); font-size: 14px; line-height: 1.5; text-align: center; opacity: 0; pointer-events: none; transition: opacity var(--press-time), transform var(--move-time) var(--ease); }
@@ -388,10 +398,14 @@ h1 { margin: 0; font-size: 27px; font-weight: 450; letter-spacing: -.8px; line-h
 .wallpaper-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 18px; }
 .wallpaper-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 125px; padding: 9px 10px 10px; border: 1px solid var(--line); border-radius: 18px; background: var(--glass); color: var(--ink); text-align: left; font-size: 14px; }
 .wallpaper-mode[aria-pressed="true"] { border-color: var(--gold); background: rgb(230 203 161 / 8%); box-shadow: inset 0 0 0 1px rgb(230 203 161 / 25%); }
-.wallpaper-swatch { display: block; width: 100%; height: 54px; border-radius: 11px; background: linear-gradient(155deg, #607b77, #263b3c 50%, #151f29); margin-bottom: 3px; }
+.wallpaper-swatch { display: block; position: relative; overflow: hidden; width: 100%; height: 54px; border-radius: 11px; background: linear-gradient(155deg, #607b77, #263b3c 50%, #151f29); margin-bottom: 3px; }
 .wallpaper-mode[data-wallpaper="morning"] .wallpaper-swatch { background: linear-gradient(155deg, #e7c99e, #697f77 57%, #344b48); }
 .wallpaper-mode[data-wallpaper="dusk"] .wallpaper-swatch { background: linear-gradient(155deg, #c9a08b, #635366 53%, #303643); }
 .wallpaper-mode[data-wallpaper="night"] .wallpaper-swatch { background: linear-gradient(155deg, #465a72, #263b4b 54%, #111c25); }
+.wallpaper-mode[data-wallpaper="annapurna"] .wallpaper-swatch { background: linear-gradient(170deg, #789595, #c9bdac 60%, #30494b); }
+.wallpaper-mode[data-wallpaper="annapurna"] .wallpaper-swatch::before { content: ""; position: absolute; inset: 8% -3% 0; background: linear-gradient(145deg, #f1eee4, #a5b8b7 48%, #385357 84%); clip-path: polygon(0 100%, 19% 49%, 30% 67%, 49% 0, 70% 70%, 82% 37%, 100% 100%); }
+.wallpaper-mode[data-wallpaper="pashupati"] .wallpaper-swatch { background: radial-gradient(ellipse at 50% 80%, #c49760, transparent 65%), linear-gradient(160deg, #455c60, #192c30 85%); }
+.wallpaper-mode[data-wallpaper="pashupati"] .wallpaper-swatch::before { content: ""; position: absolute; inset: 10% 23% 0; background: linear-gradient(140deg, #edce8e, #b28043 52%, #5f4930); clip-path: polygon(50% 0, 56% 23%, 86% 40%, 70% 44%, 70% 57%, 100% 73%, 78% 77%, 78% 100%, 22% 100%, 22% 77%, 0 73%, 30% 57%, 30% 44%, 14% 40%, 44% 23%); }
 .wallpaper-hint { color: var(--quiet); font-size: 12px; }
 @media (max-width: 359px) { .tool-button { flex-direction: column; gap: 5px; min-height: 66px; } .forecast-row { grid-template-columns: 36px minmax(0, 1fr) 34px 58px; gap: 5px; } }
 
@@ -433,3 +447,9 @@ h1 { margin: 0; font-size: 27px; font-weight: 450; letter-spacing: -.8px; line-h
 .preview-up { grid-area: 1 / 2; } .preview-left { grid-area: 2 / 1; } .preview-ok { grid-area: 2 / 2; color: var(--gold); } .preview-right { grid-area: 2 / 3; } .preview-down { grid-area: 3 / 2; }
 .preview-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 @media (min-width: 600px) { .preview-sheet { width: min(100%, 760px); } .preview-layout { display: grid; grid-template-columns: minmax(0, 1fr) 164px; gap: 24px; align-items: center; margin-bottom: 20px; } .preview-controls { margin: 0; } }
+
+/* One explicit title request; phone keyboard dictation stays with the keyboard. */
+.theater-launch { margin-top: 8px; border-color: rgb(230 203 161 / 28%); background: linear-gradient(135deg, rgb(230 203 161 / 9%), var(--glass)); }
+.theater-examples { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.theater-examples span { display: block; color: var(--ink); }
+#theater-request { min-height: 112px; }

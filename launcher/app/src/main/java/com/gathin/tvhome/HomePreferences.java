@@ -16,8 +16,8 @@ final class HomePreferences {
     private static final String TILE = "tile_size";
     private static final String ACCENT = "accent";
     private static final String LABELS = "label_mode";
-    private static final String[] WALLPAPER_VALUES = {"auto", "morning", "dusk", "night"};
-    private static final String[] WALLPAPER_NAMES = {"Automatic", "Morning", "Dusk", "Night"};
+    private static final String[] WALLPAPER_VALUES = {"auto", "morning", "dusk", "night", "annapurna", "pashupati"};
+    private static final String[] WALLPAPER_NAMES = {"Automatic", "Morning", "Dusk", "Night", "Annapurna", "Pashupati"};
     private static final String[] TILE_VALUES = {"small", "medium", "large"};
     private static final String[] TILE_NAMES = {"Small", "Medium", "Large"};
     private static final String[] ACCENT_VALUES = {"gold", "blue", "teal"};

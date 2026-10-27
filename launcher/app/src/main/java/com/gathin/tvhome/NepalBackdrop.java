@@ -53,7 +53,9 @@ public class NepalBackdrop extends View {
         String mode = HomePreferences.getWallpaperMode(getContext());
         if ("auto".equals(mode)) mode = hour >= 6 && hour < 16 ? "morning" : hour >= 16 && hour < 20 ? "dusk" : "night";
         final int resource = "morning".equals(mode) ? R.drawable.nepal_cinematic_morning
-                : "night".equals(mode) ? R.drawable.nepal_cinematic_night : R.drawable.nepal_cinematic_dusk;
+                : "night".equals(mode) ? R.drawable.nepal_cinematic_night
+                : "annapurna".equals(mode) ? R.drawable.nepal_cinematic_annapurna
+                : "pashupati".equals(mode) ? R.drawable.nepal_cinematic_pashupati : R.drawable.nepal_cinematic_dusk;
         invalidate();
         if (dimChanged) notifySceneReady();
         if (resource == requestedResource) return;

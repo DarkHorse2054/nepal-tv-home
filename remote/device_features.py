@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zoneinfo import ZoneInfo
 
-WALLPAPER_MODES = frozenset(("auto", "morning", "dusk", "night"))
+WALLPAPER_MODES = frozenset(("auto", "morning", "dusk", "night", "annapurna", "pashupati"))
 WEATHER_ENDPOINT = "https://api.open-meteo.com/v1/forecast"
 ATTRIBUTION = {"name": "Open-Meteo", "url": "https://open-meteo.com/"}
 MAX_WEATHER_BYTES = 65536

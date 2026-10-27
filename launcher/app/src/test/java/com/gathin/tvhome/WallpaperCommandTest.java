@@ -5,15 +5,15 @@ import org.junit.Test;
 
 /** Input-boundary checks run without Android, ADB, network access or preference files. */
 public class WallpaperCommandTest {
-    @Test public void acceptsOnlyTheFourBuiltInScenes() {
-        for (String mode : new String[] {"auto", "morning", "dusk", "night"}) {
+    @Test public void acceptsOnlyTheBuiltInScenes() {
+        for (String mode : new String[] {"auto", "morning", "dusk", "night", "annapurna", "pashupati"}) {
             assertTrue(mode, WallpaperCommand.accepts(WallpaperCommand.ACTION, mode));
         }
     }
 
     @Test public void rejectsMissingOrUnrecognizedModesWithoutFallback() {
         for (String mode : new String[] {null, "", "Morning", "auto ", " night", "night\n",
-                "random", "https://example.com/photo.jpg", "../../preferences", "night; input keyevent 3"}) {
+                "random", "Annapurna", "pashupati/../../", "https://example.com/photo.jpg", "../../preferences", "night; input keyevent 3"}) {
             assertFalse(String.valueOf(mode), WallpaperCommand.accepts(WallpaperCommand.ACTION, mode));
         }
     }

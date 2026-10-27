@@ -126,8 +126,8 @@ final class HomeToolsDialog extends Dialog {
     private void showWallpaper() {
         begin(Page.WALLPAPER, "Wallpaper");
         String selected = HomePreferences.getWallpaperMode(activity);
-        String[] values = {"auto", "morning", "dusk", "night"};
-        String[] names = {"Automatic", "Morning", "Dusk", "Night"};
+        String[] values = {"auto", "morning", "dusk", "night", "annapurna", "pashupati"};
+        String[] names = {"Automatic", "Morning", "Dusk", "Night", "Annapurna", "Pashupati"};
         TextView initial = null;
         for (int i = 0; i < values.length; i++) {
             final String mode = values[i];

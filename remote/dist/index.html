@@ -38,6 +38,7 @@
     <symbol id="i-source" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="3"/><path d="M8 22h8M12 18v4M7 11h10m-3-3 3 3-3 3"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-theater" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="16" rx="4"/><path d="m10 7 6 4-6 4ZM8 22h8"/></symbol>
     <symbol id="i-preview" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="3"/><path d="M8 21h8m-4-4v4"/><circle cx="12" cy="10" r="3"/></symbol>
     <symbol id="i-airplay" viewBox="0 0 24 24"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1M12 13l7 8H5Z"/></symbol>
     <symbol id="i-device" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="4"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M8 2v3m8-3v3M8 19v3m8-3v3M2 8h3m-3 8h3m14-8h3m-3 8h3"/></symbol>
@@ -107,12 +108,24 @@
       <button id="wallpaper-button" class="tool-button" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-wallpaper"/></svg><span>Wallpaper</span></button>
     </section>
     <button id="preview-button" class="preview-launch" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-preview"/></svg><span>Live view</span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
+    <button id="theater-button" class="preview-launch theater-launch" type="button" disabled aria-haspopup="dialog" aria-controls="theater-dialog"><svg class="icon" aria-hidden="true"><use href="#i-theater"/></svg><span>Play on Theater</span><svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button>
     <footer class="page-footer">
       <button id="type-button" class="footer-key" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>Type on TV</button>
       <button id="settings-button" class="footer-key" type="button"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
     </footer>
     <p id="kathmandu-time" class="quiet-time"></p>
   </main>
+
+
+  <dialog id="theater-dialog" class="sheet" aria-labelledby="theater-title">
+    <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">FIRE TV</p><h2 id="theater-title">Play on Theater</h2></div><button class="close-button" data-close type="button" aria-label="Close Play on Theater"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <p id="theater-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
+    <p class="sheet-description">Name a movie, or a show with its season and episode.</p>
+    <p id="theater-examples" class="theater-examples">Examples<span>play Inception (2010)</span><span>play Breaking Bad s2e3</span></p>
+    <p id="theater-state" class="tool-status" role="status">Ready to search on TV.</p>
+    <form id="theater-form"><label for="theater-request">What would you like to watch?</label><textarea id="theater-request" placeholder="play Inception (2010)" maxlength="320" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="theater-examples theater-error theater-note"></textarea><div class="input-caption"><span id="theater-note">Use your phone keyboard’s microphone to dictate.</span><span id="theater-count">0 / 160</span></div><p id="theater-error" class="inline-error" role="alert"></p><button id="theater-submit" class="primary-button" type="submit" disabled>Search &amp; play<svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button></form>
+    <p class="sheet-footnote">Several matches? Choose one on TV. Requests are not saved by this remote.</p>
+  </dialog>
 
   <dialog id="preview-dialog" class="sheet preview-sheet" aria-labelledby="preview-title">
     <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">FIRE TV · NO AUDIO</p><h2 id="preview-title">Live view</h2></div><button class="close-button" data-close type="button" aria-label="Close live view"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
@@ -181,6 +194,8 @@
       <button class="wallpaper-mode" data-wallpaper="morning" type="button" aria-pressed="false"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Morning</span><span class="wallpaper-hint">Soft daylight</span></button>
       <button class="wallpaper-mode" data-wallpaper="dusk" type="button" aria-pressed="false"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Dusk</span><span class="wallpaper-hint">Evening glow</span></button>
       <button class="wallpaper-mode" data-wallpaper="night" type="button" aria-pressed="false"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Night</span><span class="wallpaper-hint">After dark</span></button>
+      <button class="wallpaper-mode" data-wallpaper="annapurna" type="button" aria-pressed="false"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Annapurna</span><span class="wallpaper-hint">Snow peaks</span></button>
+      <button class="wallpaper-mode" data-wallpaper="pashupati" type="button" aria-pressed="false"><span class="wallpaper-swatch" aria-hidden="true"></span><span>Pashupati</span><span class="wallpaper-hint">Temple lights</span></button>
     </div>
     <p id="wallpaper-state" class="tool-status" aria-live="polite">Choice: Auto</p><button id="wallpaper-apply" class="primary-button" type="button">Apply wallpaper<svg class="icon" aria-hidden="true"><use href="#i-home"/></svg></button>
     <p class="sheet-footnote">This is your choice for the next action. The remote does not read the TV’s current wallpaper.</p>
@@ -213,9 +228,11 @@
     <p id="connection-help" class="sheet-description">Keep this Mac awake and your phone on the same Wi-Fi.</p>
     <button id="settings-reconnect" class="primary-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Reconnect Fire TV</button>
     <button id="pairing-button" class="secondary-button" type="button">Pair this remote</button>
+    <button id="forget-device" class="secondary-button forget-device" type="button" hidden>Forget this device</button>
     <section id="samsung-setup" class="settings-section" hidden><h3>Samsung TV</h3><p id="samsung-message" class="sheet-description" aria-live="polite">Connect once and select Allow on your Samsung.</p><button id="samsung-pair" class="secondary-button" type="button" disabled>Connect Samsung</button></section>
     <div class="text-actions settings-power"><button class="secondary-button" data-key="wake" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-power"/></svg>Wake Fire TV</button><button class="secondary-button" data-key="sleep" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-sleep"/></svg>Sleep Fire TV</button></div>
-    <section class="settings-section" aria-label="Other apps"><button id="espn-button" class="secondary-button" data-app="espn" type="button" disabled>Open ESPN</button><p class="sheet-footnote">Apps are installed separately. Sign in and manage subscriptions on your TV.</p></section>
+    <section class="settings-section" aria-labelledby="haptics-title"><label class="haptics-choice"><span id="haptics-title">Haptic feedback</span><input id="haptics-toggle" type="checkbox" role="switch" aria-describedby="haptics-help"></label><p id="haptics-help" class="sheet-description">Light taps on supported phones.</p><button id="haptics-test" class="secondary-button" type="button">Test haptics</button></section>
+    <section class="settings-section other-apps" aria-label="Other apps"><button id="espn-button" class="secondary-button" data-app="espn" type="button" disabled>Open ESPN</button><button id="framextv-button" class="secondary-button" data-app="framextv" type="button" disabled>Open Theater</button><p class="sheet-footnote">Apps are installed separately. Sign in and manage subscriptions on your TV.</p></section>
     <details class="keyboard-help"><summary>Keyboard shortcuts</summary><p>Arrow keys navigate · Enter selects · Escape goes back<br>H Home · M Menu · Space play / pause</p></details>
     <p class="sheet-footnote">Private controls on your home network. Keep this Mac awake while using the remote.</p>
   </dialog>
@@ -224,8 +241,8 @@
     <div class="sheet-handle" aria-hidden="true"></div><header class="sheet-heading"><div><p class="eyebrow">NEPAL REMOTE</p><h2 id="pair-title">Pair your remote</h2></div><button id="pair-close" class="close-button" data-close type="button" aria-label="Close pairing"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
     <p id="pair-dialog-notice" class="sheet-notice" role="status" aria-live="polite" hidden></p>
     <p id="pair-description" class="sheet-description">Enter the 6-digit code shown on your Mac.</p>
-    <form id="pair-form"><label for="pair-pin">Pairing code</label><input id="pair-pin" name="pin" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required aria-describedby="pair-error"><p id="pair-error" class="inline-error" role="alert"></p><button id="pair-submit" class="primary-button" type="submit">Connect remote<svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button></form>
-    <p class="sheet-footnote">No account needed. You can close this and look around first.</p>
+    <form id="pair-form"><label for="pair-pin">Pairing code</label><input id="pair-pin" name="pin" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required aria-describedby="pair-error"><label class="remember-choice"><input id="pair-remember" type="checkbox" checked><span>Remember this device for 30 days</span></label><p id="pair-error" class="inline-error" role="alert"></p><button id="pair-submit" class="primary-button" type="submit">Connect remote<svg class="icon" aria-hidden="true"><use href="#i-right"/></svg></button></form>
+    <p class="sheet-footnote">Use this browser and the same remote address to reconnect automatically.</p>
   </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>

@@ -9,6 +9,7 @@ final class WallpaperCommand {
 
     static boolean accepts(String action, String mode) {
         return ACTION.equals(action) && ("auto".equals(mode) || "morning".equals(mode)
-                || "dusk".equals(mode) || "night".equals(mode));
+                || "dusk".equals(mode) || "night".equals(mode)
+                || "annapurna".equals(mode) || "pashupati".equals(mode));
     }
 }

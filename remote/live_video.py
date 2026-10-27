@@ -364,7 +364,9 @@ class LiveVideo:
             "-f", "h264", "-i", "pipe:0", "-vf",
             "scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2,"
             "pad=1280:720:(ow-iw)/2:(oh-ih)/2",
-            "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
+            # Rawvideo's frame-threaded output otherwise holds a completed frame
+            # until another arrives, which can be minutes on a quiet TV screen.
+            "-pix_fmt", "yuv420p", "-threads:v", "1", "-fps_mode", "passthrough",
             "-f", "rawvideo", "-flush_packets", "1", "pipe:1"]
 
     def _ffmpeg_command(self, job, binary):

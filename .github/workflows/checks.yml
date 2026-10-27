@@ -42,12 +42,16 @@ jobs:
             --timeout 120 --exit-code 1 --log-opts='--all' .
 
   android:
-    name: Android build, unit tests and lint
+    name: Android build, unit tests and lint (${{ matrix.project }})
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [launcher, framextv]
     defaults:
       run:
-        working-directory: launcher
+        working-directory: ${{ matrix.project }}
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
