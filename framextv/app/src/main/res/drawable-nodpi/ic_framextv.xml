@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Match the bitmap's nodpi density so the launcher preserves its full detail. -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/theater_camera"
+    android:gravity="fill"
+    android:filter="true"
+    android:mipMap="true" />

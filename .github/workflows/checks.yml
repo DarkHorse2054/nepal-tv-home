@@ -72,6 +72,12 @@ jobs:
       - name: Build and check the debug source preview
         # Use the committed Gradle 8.9 wrapper; do not use the runner's system Gradle.
         run: ./gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+      - name: Check local watch-progress policy
+        if: matrix.project == 'framextv'
+        run: sh tests/run_watch_progress.sh
+      - name: Check fixed catalog parsing
+        if: matrix.project == 'framextv'
+        run: sh tests/run_catalog_policy.sh
 
   remote:
     name: Offline companion tests and browser syntax
@@ -101,3 +107,5 @@ jobs:
         run: node --check remote/dist/app.js
       - name: Check remote interactions
         run: node --test remote/tests/test_frontend.js
+      - name: Check Theater quality, resume and subtitles with offline player fixtures
+        run: node --test framextv/tests/test_quality.js framextv/tests/test_playback.js

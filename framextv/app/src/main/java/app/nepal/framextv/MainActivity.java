@@ -26,6 +26,7 @@ import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.GridView;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -35,6 +36,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -58,7 +60,11 @@ public final class MainActivity extends Activity {
     private final List<Button> filters=new ArrayList<>();
     private Future<?> activeRequest;
     private EditText query;
-    private Button search;
+    private Button search,continueWatching;
+    private WatchHistory history;
+    private LinearLayout searchRoot;
+    private TheaterHomeView home;
+    private boolean homeVisible=true;
     private TextView message;
     private ProgressBar progress;
     private GridView grid;
@@ -72,11 +78,15 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        history=new WatchHistory(this);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN|WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        LinearLayout root=new LinearLayout(this);
+        LinearLayout root=new LinearLayout(this);searchRoot=root;
         root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(42),dp(26),dp(42),dp(12)); root.setBackgroundColor(BACKGROUND);
         TextView brand=text(getString(R.string.app_name),16,GOLD); brand.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));
-        root.addView(brand,new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout searchNav=new LinearLayout(this);searchNav.setGravity(Gravity.CENTER_VERTICAL);
+        searchNav.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        Button homeButton=button("Home",this::showHome);searchNav.addView(homeButton,new LinearLayout.LayoutParams(dp(104),dp(44)));
+        root.addView(searchNav,new LinearLayout.LayoutParams(-1,-2));
         TextView heading=text("What do you want to watch?",30,INK); heading.setPadding(0,dp(8),0,dp(16));
         root.addView(heading,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
@@ -98,6 +108,9 @@ public final class MainActivity extends Activity {
             Button filter=button("all".equals(type)?"All":"movie".equals(type)?"Movies":"TV shows",()->{selectedType=type;refreshFilters();showResults(false);});
             filter.setTag(type); filters.add(filter); LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(112),dp(48));lp.rightMargin=dp(8);filterRow.addView(filter,lp);
         }
+        continueWatching=button("Continue watching",this::showContinueWatching);
+        continueWatching.setPadding(dp(8),0,dp(8),0);
+        filterRow.addView(continueWatching,new LinearLayout.LayoutParams(dp(168),dp(48)));
         root.addView(filterRow,new LinearLayout.LayoutParams(-1,-2));
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setVisibility(View.INVISIBLE);
         root.addView(progress,new LinearLayout.LayoutParams(-1,dp(3)));
@@ -110,15 +123,41 @@ public final class MainActivity extends Activity {
             CatalogClient.Item item=adapter.getItem(position);
             if(item!=null){selectedPosition=position;select(item);}
         });
-        root.addView(grid,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);refreshFilters();query.requestFocus();
+        root.addView(grid,new LinearLayout.LayoutParams(-1,0,1));
+        home=new TheaterHomeView(this,history,new TheaterHomeView.Listener(){
+            @Override public void select(CatalogClient.Item item){
+                if(!canShowUi()||busy)return;generation++;operation++;cancelWork();resultRequest=null;MainActivity.this.select(item);
+            }
+            @Override public void resume(WatchHistory.Entry entry){if(canShowUi()&&!busy)showResumeChoice(entry.spec(),entry,true);}
+            @Override public void search(){showSearch(true);}
+            @Override public void navigate(){cancelSelection();}
+        });
+        FrameLayout screen=new FrameLayout(this);screen.addView(root,new FrameLayout.LayoutParams(-1,-1));screen.addView(home,new FrameLayout.LayoutParams(-1,-1));
+        setContentView(screen);root.setVisibility(View.GONE);refreshFilters();refreshContinueWatching();home.focusNavigation();
         requestConsumed=state!=null&&state.getBoolean("theater_request_consumed",false);
         if(!requestConsumed)captureRequest(getIntent());
     }
 
     @Override protected void onStart() {super.onStart();stopped=false;}
-    @Override protected void onResume(){super.onResume();foreground=true;runPendingRequest();}
-    @Override protected void onPause(){foreground=false;super.onPause();}
-    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);captureRequest(intent);}
+    @Override protected void onResume(){super.onResume();foreground=true;refreshContinueWatching();runPendingRequest();if(homeVisible)home.activate();}
+    @Override protected void onPause(){foreground=false;if(chooser!=null)chooser.dismiss();super.onPause();}
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);
+        if(ACTION_REQUEST.equals(intent.getAction()))captureRequest(intent);else{home.backToHome();showHome();}
+    }
+    private void showSearch(boolean focus){
+        if(homeVisible){cancelSelection();home.pause();homeVisible=false;home.setVisibility(View.GONE);searchRoot.setVisibility(View.VISIBLE);}
+        if(focus)query.requestFocus();
+    }
+    private void cancelSelection(){generation++;operation++;cancelWork();resultRequest=null;if(chooser!=null)chooser.dismiss();setBusy(false,"");}
+    private void showHome(){
+        if(home==null)return;generation++;operation++;cancelWork();resultRequest=null;
+        if(chooser!=null)chooser.dismiss();setBusy(false,"");
+        InputMethodManager keyboard=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+        if(keyboard!=null)keyboard.hideSoftInputFromWindow(query.getWindowToken(),0);
+        homeVisible=true;searchRoot.setVisibility(View.GONE);home.setVisibility(View.VISIBLE);home.backToHome();
+        if(foreground&&!stopped)home.activate();home.focusNavigation();
+    }
+    @Override public void onBackPressed(){if(!homeVisible){showHome();return;}if(home.backToHome())return;super.onBackPressed();}
     @Override protected void onSaveInstanceState(Bundle state){state.putBoolean("theater_request_consumed",requestConsumed);super.onSaveInstanceState(state);}
 
     private void captureRequest(Intent intent){
@@ -135,9 +174,9 @@ public final class MainActivity extends Activity {
     }
     private void runPendingRequest(){
         if(!foreground||stopped)return;
-        if(pendingRequestError!=null){message.setText(pendingRequestError);pendingRequestError=null;return;}
+        if(pendingRequestError!=null){showSearch(true);message.setText(pendingRequestError);pendingRequestError=null;return;}
         TheaterRequest request=pendingRequest;pendingRequest=null;if(request==null)return;
-        query.setText(request.title);selectedType=request.hasEpisode()?"tv":"all";refreshFilters();
+        showSearch(false);query.setText(request.title);selectedType=request.hasEpisode()?"tv":"all";refreshFilters();
         startSearch(request.title,request);
     }
 
@@ -195,7 +234,7 @@ public final class MainActivity extends Activity {
                 if(!accept(epoch,request))return;setBusy(false,"Choose a season");
                 if(seasons.isEmpty()){message.setText("No seasons available for this show.");return;}
                 String[] labels=new String[seasons.size()];for(int i=0;i<labels.length;i++)labels[i]=seasons.get(i).title;
-                chooser=new AlertDialog.Builder(this).setTitle(item.title).setItems(labels,(dialog,position)->chooseEpisode(item,seasons.get(position))).setNegativeButton("Back",null).create();chooser.show();
+                showChooser(new AlertDialog.Builder(this).setTitle(item.title).setItems(labels,(dialog,position)->chooseEpisode(item,seasons.get(position))).setNegativeButton("Back",null).create());
             });}catch(IOException|RuntimeException failed){main.post(()->{if(accept(epoch,request))setBusy(false,"Seasons are unavailable. Try again.");});}
         });
     }
@@ -214,29 +253,94 @@ public final class MainActivity extends Activity {
         });
     }
     private void chooseEpisode(CatalogClient.Item item,CatalogClient.Season season) {
-        if(stopped)return;
+        if(!canShowUi())return;
         final int epoch=generation,request=++operation;setBusy(true,"Loading episodes…");
         activeRequest=metadata.submit(()->{
             try {List<CatalogClient.Episode> episodes=client.episodes(item.id,season.number);main.post(()->{
                 if(!accept(epoch,request))return;setBusy(false,"Choose an episode");
                 if(episodes.isEmpty()){message.setText("No episodes available for this season.");return;}
                 String[] labels=new String[episodes.size()];for(int i=0;i<labels.length;i++)labels[i]=episodes.get(i).number+" · "+episodes.get(i).title;
-                chooser=new AlertDialog.Builder(this).setTitle(item.title+" · "+season.title).setItems(labels,(dialog,position)->play(item,season.number,episodes.get(position).number)).setNegativeButton("Back",null).create();chooser.show();
+                showChooser(new AlertDialog.Builder(this).setTitle(item.title+" · "+season.title).setItems(labels,(dialog,position)->play(item,season.number,episodes.get(position).number)).setNegativeButton("Back",null).create());
             });}catch(IOException|RuntimeException failed){main.post(()->{if(accept(epoch,request))setBusy(false,"Episodes are unavailable. Try again.");});}
         });
     }
     private void play(CatalogClient.Item item,int season,int episode) {
-        if(!foreground||stopped||isFinishing())return;
-        startActivity(new Intent(this,EmbedPlayerActivity.class).putExtra(EmbedPlayerActivity.EXTRA_MEDIA_TYPE,item.type)
-                .putExtra(EmbedPlayerActivity.EXTRA_TMDB_ID,item.id).putExtra(EmbedPlayerActivity.EXTRA_SEASON,season)
-                .putExtra(EmbedPlayerActivity.EXTRA_EPISODE,episode).putExtra(EmbedPlayerActivity.EXTRA_TITLE,item.title));
+        if(!canShowUi())return;
+        EmbedSpec spec=new EmbedSpec(item.type,item.id,season,episode,item.title);
+        WatchHistory.Entry saved=history.find(spec);
+        if(saved!=null)showResumeChoice(spec,saved,false);
+        else launchPlayer(spec,0,false);
+    }
+    private void refreshContinueWatching(){
+        if(continueWatching==null)return;
+        if(home!=null)home.refreshHistory();
+        int count=history.entries().size();
+        continueWatching.setEnabled(!busy);
+        continueWatching.setContentDescription(count==0?"Continue watching, no saved titles":"Continue watching, "+count+(count==1?" saved title":" saved titles"));
+    }
+    private void showContinueWatching(){
+        if(!canShowUi()||busy)return;
+        List<WatchHistory.Entry> entries=history.entries();
+        if(entries.isEmpty()){
+            showChooser(new AlertDialog.Builder(this).setTitle("Continue watching").setMessage("Nothing to continue yet.").setPositiveButton("OK",null).create());
+            return;
+        }
+        final int epoch=generation,request=operation;
+        String[] labels=new String[entries.size()];
+        for(int index=0;index<labels.length;index++){
+            WatchHistory.Entry entry=entries.get(index);
+            labels[index]=historyTitle(entry)+"\n"+formatTime(entry.positionSeconds)+(entry.durationSeconds>0?" / "+formatTime(entry.durationSeconds):"");
+        }
+        showChooser(new AlertDialog.Builder(this).setTitle("Continue watching").setItems(labels,(dialog,position)->{
+            if(!acceptDialog(epoch,request)||position<0||position>=entries.size())return;
+            WatchHistory.Entry entry=entries.get(position);showResumeChoice(entry.spec(),entry,true);
+        }).setNegativeButton("Back",null).create());
+    }
+    private void showResumeChoice(EmbedSpec spec,WatchHistory.Entry entry,boolean removable){
+        if(!canShowUi())return;
+        final int epoch=generation,request=operation;
+        AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle(historyTitle(entry))
+                .setPositiveButton("Resume at "+formatTime(entry.positionSeconds),(dialog,which)->{
+                    if(acceptDialog(epoch,request))launchPlayer(spec,entry.positionSeconds,false);
+                }).setNegativeButton("Start over",(dialog,which)->{
+                    if(acceptDialog(epoch,request))launchPlayer(spec,0,true);
+                });
+        if(removable)builder.setNeutralButton("Remove",(dialog,which)->{
+            if(!acceptDialog(epoch,request))return;
+            history.remove(entry);refreshContinueWatching();if(!homeVisible)showContinueWatching();
+        });
+        showChooser(builder.create());
+    }
+    private void launchPlayer(EmbedSpec spec,double startSeconds,boolean restart){
+        if(!canShowUi())return;
+        if(restart){history.restart(spec);refreshContinueWatching();}
+        startActivity(new Intent(this,EmbedPlayerActivity.class).putExtra(EmbedPlayerActivity.EXTRA_MEDIA_TYPE,spec.mediaType)
+                .putExtra(EmbedPlayerActivity.EXTRA_TMDB_ID,spec.tmdbId).putExtra(EmbedPlayerActivity.EXTRA_SEASON,spec.season)
+                .putExtra(EmbedPlayerActivity.EXTRA_EPISODE,spec.episode).putExtra(EmbedPlayerActivity.EXTRA_TITLE,spec.title)
+                .putExtra(EmbedPlayerActivity.EXTRA_START_SECONDS,startSeconds));
+    }
+    private void showChooser(AlertDialog next){
+        if(!canShowUi())return;
+        if(chooser!=null)chooser.dismiss();
+        chooser=next;next.setOnDismissListener(dialog->{if(chooser==next)chooser=null;});next.show();
+        // Keep the default action visible and reachable with the Fire TV D-pad.
+        Button primary=next.getButton(AlertDialog.BUTTON_POSITIVE);
+        if(primary!=null&&primary.getVisibility()==View.VISIBLE)primary.requestFocus();
+        else if(next.getListView()!=null)next.getListView().requestFocus();
+    }
+    private boolean canShowUi(){return foreground&&!stopped&&!isFinishing()&&!isDestroyed();}
+    private boolean acceptDialog(int epoch,int request){return canShowUi()&&generation==epoch&&operation==request;}
+    private String historyTitle(WatchHistory.Entry entry){return entry.title+("tv".equals(entry.mediaType)?" · S"+entry.season+" E"+entry.episode:"");}
+    private static String formatTime(double seconds){
+        long total=Double.isNaN(seconds)||Double.isInfinite(seconds)?0:(long)Math.max(0,seconds);
+        return total>=3600?String.format(Locale.US,"%d:%02d:%02d",total/3600,(total/60)%60,total%60):String.format(Locale.US,"%d:%02d",total/60,total%60);
     }
     private boolean accept(int epoch,int request){return !stopped&&generation==epoch&&operation==request&&!isFinishing();}
-    private void setBusy(boolean value,String text){busy=value;progress.setVisibility(value?View.VISIBLE:View.INVISIBLE);grid.setEnabled(!value);message.setText(text);}
+    private void setBusy(boolean value,String text){busy=value;if(home!=null&&homeVisible&&!stopped)home.showStatus(text);progress.setVisibility(value?View.VISIBLE:View.INVISIBLE);grid.setEnabled(!value);message.setText(text);refreshContinueWatching();}
     private void cancelWork(){if(activeRequest!=null)activeRequest.cancel(true);for(Future<?> task:imageTasks)task.cancel(true);imageTasks.clear();loadingPosters.clear();client.cancelAll();}
-    @Override protected void onStop(){stopped=true;generation++;operation++;cancelWork();setBusy(false,busy?"Search paused. Select Search to retry.":message.getText().toString());if(chooser!=null)chooser.dismiss();super.onStop();}
-    @Override protected void onRestart(){super.onRestart();adapter.notifyDataSetChanged();restoreGridSelection();}
-    @Override protected void onDestroy(){cancelWork();metadata.shutdownNow();images.shutdownNow();client.close();main.removeCallbacksAndMessages(null);posters.evictAll();super.onDestroy();}
+    @Override protected void onStop(){stopped=true;if(home!=null)home.pause();generation++;operation++;cancelWork();setBusy(false,busy?"Search paused. Select Search to retry.":message.getText().toString());if(chooser!=null)chooser.dismiss();super.onStop();}
+    @Override protected void onRestart(){super.onRestart();adapter.notifyDataSetChanged();restoreGridSelection();refreshContinueWatching();}
+    @Override protected void onDestroy(){if(home!=null)home.close();cancelWork();metadata.shutdownNow();images.shutdownNow();client.close();main.removeCallbacksAndMessages(null);posters.evictAll();super.onDestroy();}
 
     private final class PosterAdapter extends BaseAdapter {
         @Override public int getCount(){return visibleItems.size();}

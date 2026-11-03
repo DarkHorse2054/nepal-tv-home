@@ -1,6 +1,6 @@
 # Manual setup
 
-This is a source preview of launcher v22 / 4.7.0-wallpapers, with six wallpaper choices and optional Theater 2.2.1. The recorded hardware is a 2018 Fire TV Stick 4K (AFTMM/mantis), Fire OS 6.7.1.1 / Android API 25, connected to a Samsung UN65TU7000BXZA. Other devices and firmware need their own compatibility checks.
+This is a source preview of launcher v24 / 4.8.1-native-clock, with six wallpaper choices, a rectangular mechanical-clock screensaver and optional Theater 2.5.1. The recorded hardware is a 2018 Fire TV Stick 4K (AFTMM/mantis), Fire OS 6.7.1.1 / Android API 25, connected to a Samsung UN65TU7000BXZA. Other devices and firmware need their own compatibility checks.
 
 The launcher can run without the webpage remote. Native Samsung Sources also connects directly from the stick to the display. A computer is needed to build/install the APK, and must stay awake only if you choose to run the optional webpage remote.
 
@@ -57,7 +57,11 @@ adb shell am start -n com.gathin.tvhome/.MainActivity
 
 Opening the launcher does not establish that the physical Home button selects it. Fire OS behavior depends on the exact device and firmware. This repository does not root devices, disable stock Home, debloat packages or replace Fire OS. The owner's successful native Home change was separate work for one exact build.
 
-Install your streaming apps normally. The default favorites are Netflix, YouTube, Disney+, Paramount+ and Hulu; the launcher does not supply those apps or subscriptions. Appearance and app preferences are stored locally. Hiding a tile does not uninstall its app. A clock screensaver is included; its activation depends on the device's screensaver configuration.
+Install your streaming apps normally. The default favorites are Netflix, YouTube, Disney+, Paramount+ and Hulu; the launcher does not supply those apps or subscriptions. Appearance and app preferences are stored locally. Hiding a tile does not uninstall its app.
+
+The included **Mechanical Clock** screensaver fills the display with a charcoal-and-champagne rectangular dial. A short, broad gold hour hand and a longer, slimmer champagne minute hand use the same San Mateo time as the English digital readout and date (`America/Los_Angeles`, including daylight saving). All 60 minute/second marks share the hands' clock angles; their distances along the rectangular perimeter intentionally vary. The inset mechanism is a decorative animation with layered gears, bridges, jewels and a balance spring.
+
+The face is drawn from native vector geometry and cached at the output size. A separate hardware surface requests the current display's physical resolution, up to 3840×2160, without changing the launcher's normal UI resolution or global display settings. Allocation/render failures trigger a bounded 1080p fallback; repeated failures end the screensaver. Actual 4K presentation and frame cadence require validation on each device. Everything is rendered locally without network access. Any remote key dismisses the clock. The existing `com.gathin.tvhome/.ClockDream` service and device-controlled idle timing are preserved across an in-place update.
 
 ## 4. Pair native Samsung Sources
 
@@ -117,7 +121,9 @@ Choose Get on your own device. Once installed, ESPN appears in the launcher app 
 
 ## 7. Optional Theater
 
-Build and install Theater separately using its [portable build instructions](../framextv/README.md#build-and-install). Phone title requests require Theater 2.2.1 or later. Open it from the launcher app drawer or **remote Settings → Other apps → Open Theater**. The app provides native movie/show search and season/episode selection, then opens the provider's web player inside the app.
+Build and install Theater separately using its [portable build instructions](../framextv/README.md#build-and-install). Phone title requests require Theater 2.2.1 or later. Open it from the launcher app drawer or **remote Settings → Other apps → Open Theater**. The app opens on a native browse home with Home, Movies, TV shows, and Search tabs. It provides featured artwork, New/Popular/genre rows, movie/show search, and season/episode selection, then opens the provider's web player inside the app.
+
+Theater 2.4 adds **Continue watching**, **Resume / Start over**, and a saved **Subtitles** On/Off preference. Progress begins saving with this version and stays on the Fire TV. Subtitle availability and supported seeking depend on the current source.
 
 For phone requests, choose **Play on Theater** and enter `play Inception (2010)` or `play Breaking Bad s2e3`. A bare title or Search/Find request shows results without autoplaying. The companion wakes Fire TV before the handoff; it does not power on a separate display. Correct-player opening and the empty/loading-grid crash fixes were checked on the tested device, but recent continuous movie playback stalled. Read [Theater's known issues](../framextv/README.md#known-issues) before relying on playback.
 

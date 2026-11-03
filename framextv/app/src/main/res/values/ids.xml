@@ -2,4 +2,5 @@
 <resources>
     <item name="player_controls" type="id" />
     <item name="player_status" type="id" />
+    <item name="player_subtitles" type="id" />
 </resources>

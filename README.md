@@ -2,7 +2,7 @@
 
 A calm, dark home screen for Fire TV with Himalayan scenes, an English clock, a small Nepali date and a compact glass dock. Adapted from [Gathin23/tv-vibehack](https://github.com/Gathin23/tv-vibehack).
 
-**Launcher v22 / 4.7.0-wallpapers · Theater 2.2.1 · source preview**
+**Launcher v24 / 4.8.1-native-clock · Theater 2.5.1 · source preview**
 
 ![Nepal TV Home on the tested Fire TV](docs/images/home.png)
 
@@ -13,16 +13,24 @@ A calm, dark home screen for Fire TV with Himalayan scenes, an English clock, a 
 - Fixed wallpaper colors while browsing, with optional time-of-day scenes plus Annapurna and Pashupati artwork. See [wallpaper artwork](docs/WALLPAPER-ARTWORK.md).
 - A frosted dock with rounded tiles, gentle focus lift and compact official Netflix/YouTube marks; other apps use native artwork.
 - English San Mateo time/date and a smaller Kathmandu clock and Bikram Sambat civil date.
-- Local appearance settings, favorite-app controls and an included clock screensaver.
+- Local appearance settings, favorite-app controls and a full-screen rectangular mechanical-clock screensaver with live analog hands, an English digital readout and local date.
 - **Sources on the TV:** pair a compatible Samsung once, then use the Fire remote to choose from Samsung's input picker. No computer needed.
 - On-TV Tools for live Fire TV RAM/storage, current weather and a seven-day forecast, and wallpaper choices.
 - AirPlay connection help in TV Home and the phone remote, using a compatible television's built-in receiver.
 - An optional phone/web remote with the same tools, a glass D-pad, app dock, Type on TV, Samsung controls, remembered pairing and optional browser haptics.
 - An ESPN launch shortcut in remote Settings; install the official app separately.
-- An optional [Theater TV app](framextv/README.md) with native movie/show search, season/episode selection, phone title commands and frameXTV's embedded web player. Use **Play on Theater** beside Live view or launch the app from remote Settings.
+- An optional [Theater TV app](framextv/README.md) with a native browse home, New/Popular/genre shelves, movie/show search, season/episode selection, Continue watching, subtitles, phone title commands and frameXTV's embedded web player. Use **Play on Theater** beside Live view or launch the app from remote Settings.
 - Optional **Live view** in the phone remote: continuous video or separate Snapshots, explicit Start/Stop and an in-sheet D-pad; no audio on the tested Fire TV.
 
 Netflix, YouTube, Disney+, Paramount+ and Hulu are the default favorites. Install the apps separately; subscriptions are not included.
+
+## Mechanical clock
+
+![Mechanical Clock captured on the tested Fire TV at 3840 by 2160](docs/images/mechanical-clock.png)
+
+The rectangular clock fills the screen with distinct hour and minute hands, exact angular markers, a digital time inset and an animated decorative mechanism. It renders locally and introduces no network connection or new permission.
+
+[Watch a 25-second recording from the actual Fire TV](docs/images/mechanical-clock.mp4). The recording is 720p; the clock itself presented at native 3840×2160 on the tested device. An uninterrupted one-minute measurement averaged about 18 frames per second. Recording adds load and captures fewer frames, so it does not represent the clock's normal animation cadence. Other devices need their own checks. See [screensaver setup](docs/SETUP.md#3-install-and-open).
 
 ## Phone remote
 
@@ -60,7 +68,7 @@ Clock locations currently default to San Mateo and Kathmandu in source. On-TV we
 
 ## Known issues
 
-- Theater 2.2.1's latest API-25 checks opened the correct movie players from phone requests, woke Fire TV, and observed no new native crashes, including empty/loading-result regressions. Continuous playback stalled in recent Inception and The Matrix checks; reliable provider playback remains unresolved. A loaded player or sent command does not confirm a playable stream.
+- Theater 2.5 adds a poster-led browse home and category shelves, retaining local resume positions, saved subtitles and 2.3's highest offered quality preference. An API-25 quality check confirmed a 1080p source, Pause preservation, hidden controls and 11 seconds of advancing playback. Earlier movie checks stalled; reliable long-form provider playback remains unverified. A loaded player or sent command does not confirm a playable stream.
 - Live view is video-only on the tested Fire TV, adds several seconds of delay and may show blank protected content. iPhone Safari does not provide the general browser Vibration API, so haptics are unavailable there.
 
 ## Security

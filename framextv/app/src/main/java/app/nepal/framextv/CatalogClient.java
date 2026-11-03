@@ -13,9 +13,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -36,7 +38,6 @@ public final class CatalogClient implements Closeable {
     private static final String API = "https://api.framextv.cc";
     private static final int JSON_LIMIT = 512 * 1024;
     private static final int POSTER_LIMIT = 2 * 1024 * 1024;
-    private static final int MAX_RESULTS = 24;
     private static final int MAX_SEASONS = 200;
     private static final int MAX_EPISODES = 1000;
     private static final int SOCKET_TIMEOUT_MS = 6000;
@@ -44,14 +45,42 @@ public final class CatalogClient implements Closeable {
 
     public static final class Item {
         public final int id;
-        public final String type, title, year, posterUrl;
+        public final String type, title, year, posterUrl, backdropUrl, overview;
 
         Item(int id, String type, String title, String year, String posterUrl) {
+            this(id, type, title, year, posterUrl, "", "");
+        }
+
+        Item(int id, String type, String title, String year, String posterUrl,
+                String backdropUrl, String overview) {
             this.id = id;
             this.type = type;
             this.title = title;
             this.year = year;
             this.posterUrl = posterUrl;
+            this.backdropUrl = backdropUrl;
+            this.overview = overview;
+        }
+    }
+
+    /** Fixed first-party home rails; no caller-supplied path or genre query. */
+    public enum BrowseSection {
+        TRENDING_MOVIES("Trending now", "movie", "trending_movies"),
+        POPULAR_MOVIES("Popular movies", "movie", "popular_movies"),
+        POPULAR_TV("Popular shows", "tv", "popular_tv"),
+        NEW_RELEASES("New releases", "movie", "new_releases"),
+        ACTION_MOVIES("Action", "movie", "action_movies"),
+        SCIFI_MOVIES("Science fiction", "movie", "scifi_movies"),
+        THRILLER_MOVIES("Thrillers", "movie", "thriller_movies"),
+        COMEDY_MOVIES("Comedy", "movie", "comedy_movies");
+
+        public final String label, type;
+        final String key;
+
+        BrowseSection(String label, String type, String key) {
+            this.label = label;
+            this.type = type;
+            this.key = key;
         }
     }
 
@@ -98,32 +127,80 @@ public final class CatalogClient implements Closeable {
         if (clean.length() > 120)
             throw new IOException("Use a title of 120 characters or fewer.");
         JSONObject value = json("/api/search?q=" + URLEncoder.encode(clean, "UTF-8") + "&type=all&page=1", request);
-        JSONArray rows = value.optJSONArray("results");
-        if (rows == null) {
-            Object total = value.opt("totalResults");
-            // The provider returns explicit null, rather than [], for no matches.
-            if (value.has("results") && value.isNull("results") && total instanceof Number
-                    && ((Number) total).doubleValue() == 0) return Collections.emptyList();
-            throw new IOException("The catalog returned an unreadable search result.");
-        }
-        List<Item> result = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        for (int index = 0; index < rows.length() && result.size() < MAX_RESULTS; index++) {
+        List<Item> result = CatalogPolicy.results(catalogObject(value, request), "");
+        check(request);
+        return result;
+    }
+
+    /** All supported shelves from a single bounded request. Call off the UI thread. */
+    public Map<BrowseSection, List<Item>> home() throws IOException {
+        long request = begin();
+        JSONObject value = json("/api/home", request);
+        Map<String, Object> root = new HashMap<>();
+        root.put("success", value.opt("success"));
+        JSONObject rails = value.optJSONObject("rails");
+        if (rails == null) throw new IOException("The catalog returned unreadable home shelves.");
+        Map<String, Object> shelves = new HashMap<>();
+        for (BrowseSection section : BrowseSection.values()) {
             check(request);
-            JSONObject row = rows.optJSONObject(index);
-            if (row == null) continue;
-            int id = number(row, "id", Integer.MAX_VALUE, false);
-            String type = text(row.opt("type"), "", 16);
-            if (id < 1 || !("movie".equals(type) || "tv".equals(type)) || !seen.add(type + ":" + id)) continue;
-            String title = text(row.opt("title"), text(row.opt("name"), "Untitled", 160), 160);
-            String year = text(row.opt("year"), "", 10);
-            if (!year.matches("[0-9]{4}")) {
-                String date = text(row.opt("release_date"), text(row.opt("first_air_date"), "", 32), 32);
-                year = date.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}.*") ? date.substring(0, 4) : "";
-            }
-            result.add(new Item(id, type, title, year, posterAddress(row)));
+            JSONObject shelf = rails.optJSONObject(section.key);
+            if (shelf != null) shelves.put(section.key, catalogObject(shelf, request));
+            else if (rails.has(section.key)) shelves.put(section.key, null);
         }
-        return Collections.unmodifiableList(result);
+        root.put("rails", shelves);
+        Map<BrowseSection, List<Item>> result = CatalogPolicy.home(root);
+        check(request);
+        return result;
+    }
+
+    public List<Item> browse(BrowseSection section) throws IOException {
+        if (section == null) throw new IOException("Choose a catalog section.");
+        return home().get(section);
+    }
+
+    /** Bounded metadata lookup for a known movie/show, for example a Continue card. */
+    public Item details(String type, int id) throws IOException {
+        requireId(id);
+        if (!("movie".equals(type) || "tv".equals(type)))
+            throw new IOException("Choose a valid movie or show.");
+        long request = begin();
+        JSONObject value = json("/api/details?id=" + id + "&type=" + type, request);
+        Map<String, Object> row = catalogRow(value);
+        row.put("success", value.opt("success"));
+        Item item = CatalogPolicy.details(row, type, id);
+        check(request);
+        return item;
+    }
+
+    private Map<String, Object> catalogObject(JSONObject value, long request) throws IOException {
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", value.opt("success"));
+        result.put("totalResults", value.opt("totalResults"));
+        if (!value.has("results")) return result;
+        Object raw = value.opt("results");
+        if (raw == JSONObject.NULL) result.put("results", null);
+        else if (raw instanceof JSONArray) {
+            JSONArray array = (JSONArray) raw;
+            if (array.length() > CatalogPolicy.MAX_INPUT_ROWS)
+                throw new IOException("The catalog returned too many titles.");
+            List<Object> rows = new ArrayList<>();
+            for (int index = 0; index < array.length(); index++) {
+                check(request);
+                JSONObject row = array.optJSONObject(index);
+                rows.add(row == null ? null : catalogRow(row));
+            }
+            result.put("results", rows);
+        } else result.put("results", Boolean.FALSE);
+        return result;
+    }
+
+    private static Map<String, Object> catalogRow(JSONObject row) {
+        Map<String, Object> result = new HashMap<>();
+        for (String key : CatalogPolicy.ITEM_KEYS) {
+            Object value = row.opt(key);
+            if (value instanceof String || value instanceof Number) result.put(key, value);
+        }
+        return result;
     }
 
     public List<Season> seasons(int tvId) throws IOException {
@@ -182,7 +259,7 @@ public final class CatalogClient implements Closeable {
         check(request);
         try {
             JSONObject value = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-            if (!value.optBoolean("success", false)) throw new IOException("The catalog could not load this request.");
+            if (!Boolean.TRUE.equals(value.opt("success"))) throw new IOException("The catalog could not load this request.");
             return value;
         } catch (JSONException invalid) {
             throw new IOException("The catalog returned an unreadable response.");
@@ -299,7 +376,7 @@ public final class CatalogClient implements Closeable {
         }
     }
 
-    private static String text(Object raw, String fallback, int maximum) {
+    static String text(Object raw, String fallback, int maximum) {
         if (!(raw instanceof String)) return fallback;
         String original = (String) raw;
         StringBuilder sanitized = new StringBuilder(Math.min(original.length(), maximum));
@@ -314,17 +391,7 @@ public final class CatalogClient implements Closeable {
         return value.substring(0, end);
     }
 
-    private static String posterAddress(JSONObject row) {
-        for (String key : new String[]{"poster", "image", "poster_path"}) {
-            String value = text(row.opt(key), "", 512);
-            if (value.startsWith("/") && !value.startsWith("//")) value = "https://image.tmdb.org/t/p/w500" + value;
-            String approved = approvedPoster(value);
-            if (!approved.isEmpty()) return approved;
-        }
-        return "";
-    }
-
-    private static String approvedPoster(String raw) {
+    static String approvedPoster(String raw) {
         if (raw == null || raw.length() > 512) return "";
         try {
             URI uri = new URI(raw);

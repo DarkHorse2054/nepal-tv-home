@@ -22,6 +22,6 @@ Use a maintained Python 3.11+ interpreter and the hash-pinned `remote/requiremen
 
 ## Review and reporting
 
-The [October 26 review and October 27 scope update](docs/SECURITY-REVIEW.md) record what was checked, later feature boundaries and limits. A clean scan is evidence about that revision, not a guarantee of permanent security.
+The [security review and November 3 publication review](docs/SECURITY-REVIEW.md) record what was checked, later feature boundaries and limits. A clean scan is evidence about that revision, not a guarantee of permanent security.
 
 Never post PINs, tokens, private device files, keys or screenshots containing personal information in a public issue. Use GitHub's private vulnerability reporting for this repository if available; otherwise ask the maintainer for a private reporting channel without including the sensitive details. If a real credential is ever committed, revoke/rotate it immediately; deleting the file in a later commit does not remove it from history.

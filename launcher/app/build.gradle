@@ -10,8 +10,8 @@ android {
         applicationId 'com.gathin.tvhome'
         minSdk 25
         targetSdk 29
-        versionCode 22
-        versionName '4.7.0-wallpapers'
+        versionCode 24
+        versionName '4.8.1-native-clock'
     }
 
     buildTypes {

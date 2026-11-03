@@ -2,7 +2,9 @@ package app.nepal.framextv;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.net.http.SslError;
@@ -35,6 +37,10 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import org.json.JSONException;
 import org.json.JSONObject;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 
 /** Native controls around the documented provider web embed, not a native media decoder. */
 public final class EmbedPlayerActivity extends Activity {
@@ -47,6 +53,7 @@ public final class EmbedPlayerActivity extends Activity {
     public static final String EXTRA_SEASON = "app.nepal.framextv.extra.SEASON";
     public static final String EXTRA_EPISODE = "app.nepal.framextv.extra.EPISODE";
     public static final String EXTRA_TITLE = "app.nepal.framextv.extra.TITLE";
+    public static final String EXTRA_START_SECONDS = "app.nepal.framextv.extra.START_SECONDS";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private EmbedSpec spec;
@@ -54,15 +61,33 @@ public final class EmbedPlayerActivity extends Activity {
     private FrameLayout playerHost, fullscreenHost;
     private LinearLayout controls;
     private TextView status;
-    private Button playButton, pauseButton, rewindButton, forwardButton, retryButton;
+    private Button playButton, pauseButton, rewindButton, forwardButton, retryButton, subtitlesButton;
+    private AlertDialog subtitlesDialog;
+    private SharedPreferences playerPreferences;
+    private WatchHistory history;
+    private double resumeSeconds;
+    private boolean subtitlesEnabled, playbackInstalled, playbackAssetRead, progressReadInFlight;
+    private boolean progressReady, resumeFailureReported, hasLoadedPlayer;
+    private String playbackScript;
+    private JSONObject latestPlaybackState;
+    private long featureGeneration, progressGeneration;
     private View fullscreenView;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
     private boolean foreground, clearedInBackground, loaded, destroyed, pageFailed, webReady;
     private boolean controlsPinned, revealingTouch, autoplayPending, providerNavigation;
     private int chromeGeneration, playbackGeneration, revealKey = -1, autoplayChecks;
+    private long qualityGeneration;
+    private String qualityScript;
+    private boolean qualityAssetRead, qualityInstalled;
     private boolean initialLoadPending = true;
     private final Runnable hideControlsTask = () -> hideControls(true);
     private final Runnable autoplayTask = this::checkAutoplay;
+    private final Runnable progressTask = new Runnable() {
+        @Override public void run() {
+            captureProgress();
+            if (foreground && loaded && !destroyed) handler.postDelayed(this, 5000);
+        }
+    };
     private final Runnable loadTimeout = () -> {
         if (foreground && !loaded) showError("Player is taking longer than expected. Retry.");
     };
@@ -78,6 +103,12 @@ public final class EmbedPlayerActivity extends Activity {
             finish();
             return;
         }
+        history = new WatchHistory(this);
+        playerPreferences = getSharedPreferences("theater_player", MODE_PRIVATE);
+        subtitlesEnabled = playerPreferences.getBoolean("subtitles_enabled", true);
+        resumeSeconds = getIntent().getDoubleExtra(EXTRA_START_SECONDS, 0);
+        if (Double.isNaN(resumeSeconds) || Double.isInfinite(resumeSeconds)
+                || resumeSeconds < 15 || resumeSeconds > 604800) resumeSeconds = 0;
         createViews();
         status.setText("Loading embedded player…");
         updateActions();
@@ -126,6 +157,8 @@ public final class EmbedPlayerActivity extends Activity {
         pauseButton = addButton("Pause", () -> command("pause", 0));
         rewindButton = addButton("−10s", () -> command("seekBy", -10));
         forwardButton = addButton("+10s", () -> command("seekBy", 10));
+        subtitlesButton = addButton("Subtitles", this::showSubtitleOptions);
+        subtitlesButton.setId(R.id.player_subtitles);
         retryButton = addButton("Retry", this::loadPlayer);
         root.addView(controls, new FrameLayout.LayoutParams(-1, dp(64), Gravity.TOP));
         fullscreenHost = new FrameLayout(this);
@@ -186,11 +219,26 @@ public final class EmbedPlayerActivity extends Activity {
                 return rejectNavigation(address);
             }
             @Override public void onPageStarted(WebView view, String address, android.graphics.Bitmap icon) {
+                boolean replacingPlayer = loaded && foreground && spec.originFor(address) != null;
+                stopQualityPreference();
+                stopPlaybackFeatures();
+                playbackGeneration++;
+                handler.removeCallbacks(autoplayTask);
+                progressGeneration++;
+                progressReadInFlight = false;
                 if (!foreground || "about:blank".equals(address)) return;
                 if (spec.originFor(address) == null) {
                     view.stopLoading();
                     failPage("Only this title's embedded player can open here.");
                     return;
+                }
+                if (replacingPlayer) {
+                    // Provider-driven document replacements need the same restore gate as Retry.
+                    WatchHistory.Entry saved = history.find(spec);
+                    resumeSeconds = saved == null ? 0 : saved.positionSeconds;
+                    progressReady = resumeSeconds == 0;
+                    resumeFailureReported = false;
+                    latestPlaybackState = null;
                 }
                 pageFailed = false;
                 loaded = false;
@@ -207,6 +255,10 @@ public final class EmbedPlayerActivity extends Activity {
                 scheduleControlsHide();
                 handler.removeCallbacks(autoplayTask);
                 handler.post(autoplayTask);
+                startQualityPreference();
+                startPlaybackFeatures();
+                handler.removeCallbacks(progressTask);
+                handler.post(progressTask);
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (foreground && request.isForMainFrame() && !"about:blank".equals(request.getUrl().toString())) {
@@ -270,6 +322,19 @@ public final class EmbedPlayerActivity extends Activity {
     private void loadPlayer() {
         if (web == null || destroyed || !webReady) return;
         if (!foreground) { initialLoadPending = true; return; }
+        stopQualityPreference();
+        stopPlaybackFeatures();
+        if (hasLoadedPlayer) {
+            WatchHistory.Entry saved = history.find(spec);
+            resumeSeconds = saved == null ? 0 : saved.positionSeconds;
+        }
+        hasLoadedPlayer = true;
+        progressReady = resumeSeconds == 0;
+        resumeFailureReported = false;
+        latestPlaybackState = null;
+        progressGeneration++;
+        progressReadInFlight = false;
+        handler.removeCallbacks(progressTask);
         loaded = false;
         pageFailed = false;
         controlsPinned = false;
@@ -287,7 +352,7 @@ public final class EmbedPlayerActivity extends Activity {
 
     private void updateActions() {
         boolean available = loaded && web != null && webReady && !destroyed;
-        for (Button button : new Button[] {playButton, pauseButton, rewindButton, forwardButton}) {
+        for (Button button : new Button[] {playButton, pauseButton, rewindButton, forwardButton, subtitlesButton}) {
             if (button == null) continue;
             button.setEnabled(available);
             button.setAlpha(available ? 1f : .45f);
@@ -295,6 +360,9 @@ public final class EmbedPlayerActivity extends Activity {
     }
 
     private void failPage(String message) {
+        stopQualityPreference();
+        stopPlaybackFeatures();
+        handler.removeCallbacks(progressTask);
         pageFailed = true;
         loaded = false;
         autoplayPending = false;
@@ -321,6 +389,7 @@ public final class EmbedPlayerActivity extends Activity {
     private void scheduleControlsHide() {
         handler.removeCallbacks(hideControlsTask);
         if (foreground && loaded && !pageFailed && !controlsPinned && !destroyed && fullscreenView == null
+                && (subtitlesDialog == null || !subtitlesDialog.isShowing())
                 && controls.getVisibility() == View.VISIBLE && !touchExplorationEnabled()) {
             handler.postDelayed(hideControlsTask, CONTROLS_HIDE_DELAY_MS);
         }
@@ -360,16 +429,23 @@ public final class EmbedPlayerActivity extends Activity {
     private void checkAutoplay() {
         if (!foreground || destroyed || !loaded || pageFailed || !autoplayPending || web == null) return;
         String origin = spec.originFor(web.getUrl());
-        if (origin == null || ++autoplayChecks > 45) { autoplayPending = false; return; }
+        if (origin == null || ++autoplayChecks > 90) { autoplayPending = false; return; }
         final int revision = playbackGeneration;
         String script = "(function(){if(window.location.origin!=='" + origin + "')return null;"
-                + "var v=document.querySelector('video');return v?{ready:v.readyState,paused:v.paused,ended:v.ended}:null;})()";
+                + "var v=document.querySelector('video'),p=window.__nepalTheaterPlayback,s=p&&p.getState?p.getState():null;"
+                + "return {ready:v?v.readyState:0,paused:v?v.paused:true,ended:v?v.ended:false,resume:s?s.resumePhase:null};})()";
         web.evaluateJavascript(script, value -> {
             if (!foreground || destroyed || !loaded || !autoplayPending || revision != playbackGeneration) return;
             try {
                 if (value != null && value.length() <= 256 && !"null".equals(value)) {
                     JSONObject state = new JSONObject(value);
-                    if (state.optBoolean("ended", false)) {
+                    String resume = state.optString("resume", "");
+                    if ("waiting".equals(resume) || "seeking".equals(resume)
+                            || resumeSeconds > 0 && !progressReady && resume.isEmpty()) {
+                        // Restore position before sending Play, without changing a user's Pause.
+                    } else if ("unavailable".equals(resume) && resumeSeconds > 0) {
+                        reportResumeFailure();
+                    } else if (state.optBoolean("ended", false)) {
                         autoplayPending = false;
                     } else if (state.optInt("ready", 0) >= 2 && !state.optBoolean("paused", true)) {
                         autoplayPending = false;
@@ -391,6 +467,17 @@ public final class EmbedPlayerActivity extends Activity {
             else if ("togglePlay".equals(action)) autoplayPending = !autoplayPending;
             if (!autoplayPending) handler.removeCallbacks(autoplayTask);
             return;
+        }
+        if ("seekBy".equals(action)) {
+            cancelPendingResume();
+            progressReady = true;
+        }
+        if (("play".equals(action) || "togglePlay".equals(action)) && resumeFailureReported) {
+            history.restart(spec);
+            resumeSeconds = 0;
+            progressReady = true;
+            resumeFailureReported = false;
+            controlsPinned = false;
         }
         autoplayPending = "play".equals(action);
         if (autoplayPending) autoplayChecks = 0;
@@ -422,6 +509,188 @@ public final class EmbedPlayerActivity extends Activity {
         web.evaluateJavascript(script, null);
     }
 
+    private void startPlaybackFeatures() {
+        if (!foreground || destroyed || !loaded || pageFailed || web == null || !webReady || playbackInstalled) return;
+        String origin = spec.originFor(web.getUrl());
+        if (origin == null) return;
+        if (!playbackAssetRead) {
+            playbackAssetRead = true;
+            try (InputStream source = getAssets().open("theater-playback.js");
+                 ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[4096];
+                int count;
+                while ((count = source.read(buffer)) != -1) {
+                    if (bytes.size() + count > 65_536) throw new IOException("Playback asset exceeds limit");
+                    bytes.write(buffer, 0, count);
+                }
+                playbackScript = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+            } catch (IOException unavailable) {
+                if (resumeSeconds > 0) reportResumeFailure();
+                return;
+            }
+        }
+        if (playbackScript == null) return;
+        try {
+            JSONObject config = new JSONObject();
+            config.put("origin", origin);
+            config.put("path", spec.path);
+            config.put("generation", ++featureGeneration);
+            config.put("resumeSeconds", progressReady ? 0 : resumeSeconds);
+            config.put("subtitlesEnabled", subtitlesEnabled);
+            config.put("preferredLanguage", "en");
+            playbackInstalled = true;
+            web.evaluateJavascript("(" + playbackScript + ")(" + config + ");", null);
+        } catch (JSONException ignored) { /* Fixed bounded primitive configuration only. */ }
+    }
+
+    private void stopPlaybackFeatures() {
+        featureGeneration++;
+        if (!playbackInstalled) return;
+        playbackInstalled = false;
+        if (web == null || destroyed || spec.originFor(web.getUrl()) == null) return;
+        web.evaluateJavascript("(function(){var p=window.__nepalTheaterPlayback;if(p&&p.stop)p.stop();})()", null);
+    }
+
+    private void cancelPendingResume() {
+        resumeSeconds = 0;
+        if (web == null || destroyed || spec.originFor(web.getUrl()) == null) return;
+        web.evaluateJavascript("(function(){var p=window.__nepalTheaterPlayback;if(p&&p.cancelResume)p.cancelResume();})()", null);
+    }
+
+    private void reportResumeFailure() {
+        if (resumeFailureReported || destroyed || !foreground) return;
+        resumeFailureReported = true;
+        autoplayPending = false;
+        handler.removeCallbacks(autoplayTask);
+        showError("Could not restore position. Retry or press Play to start.");
+    }
+
+    /** Capture timing only; provider URLs, credentials and subtitle contents never leave the page. */
+    private void captureProgress() {
+        if (web == null || destroyed || !loaded || pageFailed || progressReadInFlight) return;
+        String origin = spec.originFor(web.getUrl());
+        if (origin == null) return;
+        final long revision = progressGeneration;
+        final long observedAt = System.currentTimeMillis();
+        final EmbedSpec observedSpec = spec;
+        progressReadInFlight = true;
+        String script = "(function(){if(window.location.origin!==" + JSONObject.quote(origin)
+                + "||(window.location.pathname!==" + JSONObject.quote(spec.path)
+                + "&&window.location.pathname!==" + JSONObject.quote(spec.path + "/") + "))return null;"
+                + "var v=document.querySelector('video'),p=window.__nepalTheaterPlayback;"
+                + "return {playback:p&&p.getState?p.getState():null,video:v?{position:v.currentTime,duration:v.duration,"
+                + "ended:v.ended,ready:v.readyState}:null};})()";
+        web.evaluateJavascript(script, value -> {
+            if (revision != progressGeneration) return;
+            progressReadInFlight = false;
+            try {
+                if (value == null || value.length() > 2048 || "null".equals(value)) return;
+                JSONObject snapshot = new JSONObject(value);
+                JSONObject state = snapshot.optJSONObject("playback");
+                latestPlaybackState = state;
+                String phase = state == null ? "" : state.optString("resumePhase", "");
+                if ("done".equals(phase) || "skipped".equals(phase) || "cancelled".equals(phase)) progressReady = true;
+                if (!destroyed) {
+                    String subtitlePhase = state == null ? "" : state.optString("subtitlePhase", "");
+                    subtitlesButton.setContentDescription("Subtitles, " + (!subtitlesEnabled ? "off"
+                            : "selected".equals(subtitlePhase) ? "on" : "unavailable".equals(subtitlePhase)
+                            ? "not available from this source" : "on when available"));
+                    if ("unavailable".equals(phase) && resumeSeconds > 0 && !progressReady) reportResumeFailure();
+                }
+                if (!progressReady || "waiting".equals(phase) || "seeking".equals(phase)) return;
+                JSONObject video = snapshot.optJSONObject("video");
+                if (video == null || video.optInt("ready", 0) < 1) return;
+                history.record(observedSpec, video.optDouble("position", Double.NaN),
+                        video.optDouble("duration", Double.NaN), video.optBoolean("ended", false), observedAt);
+            } catch (JSONException ignored) { /* A document replacement can invalidate a pending sample. */ }
+        });
+    }
+
+    private void showSubtitleOptions() {
+        if (!foreground || destroyed || !loaded || isFinishing()) return;
+        String phase = latestPlaybackState == null ? "" : latestPlaybackState.optString("subtitlePhase", "");
+        String label = latestPlaybackState == null ? "" : latestPlaybackState.optString("subtitleLabel", "");
+        if (label.length() > 100) label = "";
+        String detail = !subtitlesEnabled ? "Off" : "selected".equals(phase) && !label.isEmpty()
+                ? label : "unavailable".equals(phase) ? "No tracks yet" : "On when available";
+        if (subtitlesDialog != null) subtitlesDialog.dismiss();
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Subtitles")
+                .setSingleChoiceItems(new String[] {"On (English preferred)", "Off"}, subtitlesEnabled ? 0 : 1,
+                        (selected, which) -> {
+                            if (!foreground || destroyed) return;
+                            subtitlesEnabled = which == 0;
+                            playerPreferences.edit().putBoolean("subtitles_enabled", subtitlesEnabled).apply();
+                            if (playbackInstalled && web != null && spec.originFor(web.getUrl()) != null) {
+                                web.evaluateJavascript("(function(){var p=window.__nepalTheaterPlayback;if(p&&p.setSubtitles)p.setSubtitles("
+                                        + subtitlesEnabled + ");})()", null);
+                            } else startPlaybackFeatures();
+                            selected.dismiss();
+                        }).setNegativeButton("Back", null).create();
+        // A separate title keeps the native choice list visible on older Fire OS AlertDialog layouts.
+        dialog.setTitle("Subtitles · " + detail);
+        subtitlesDialog = dialog;
+        dialog.setOnDismissListener(ignored -> {
+            if (subtitlesDialog == dialog) subtitlesDialog = null;
+            if (foreground && !destroyed) {
+                subtitlesButton.requestFocus();
+                scheduleControlsHide();
+            }
+        });
+        handler.removeCallbacks(hideControlsTask);
+        dialog.show();
+        if (dialog.getListView() != null) dialog.getListView().requestFocus();
+    }
+
+    /** Prefer the provider's highest offered quality through its own settings, independently of Play. */
+    private void startQualityPreference() {
+        if (!foreground || destroyed || !loaded || pageFailed || web == null || !webReady || qualityInstalled) return;
+        String origin = spec.originFor(web.getUrl());
+        if (origin == null) return;
+        if (!qualityAssetRead) {
+            qualityAssetRead = true;
+            // A small packaged asset, bounded for API 25 without readAllBytes or network I/O.
+            try (InputStream source = getAssets().open("theater-highest-quality.js");
+                 ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[4096];
+                int count;
+                while ((count = source.read(buffer)) != -1) {
+                    if (bytes.size() + count > 65_536) throw new IOException("Quality asset exceeds limit");
+                    bytes.write(buffer, 0, count);
+                }
+                qualityScript = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+            } catch (IOException unavailable) {
+                // Playback remains available if the optional provider integration cannot be loaded.
+                return;
+            }
+        }
+        if (qualityScript == null) return;
+        try {
+            JSONObject config = new JSONObject();
+            config.put("origin", origin);
+            config.put("path", spec.path);
+            config.put("generation", ++qualityGeneration);
+            qualityInstalled = true;
+            web.evaluateJavascript("(" + qualityScript + ")(" + config + ");", null);
+        } catch (JSONException ignored) { /* Fixed primitive configuration only. */ }
+    }
+
+    private void stopQualityPreference() {
+        qualityGeneration++;
+        if (!qualityInstalled) return;
+        qualityInstalled = false;
+        if (web == null || destroyed || spec.originFor(web.getUrl()) == null) return;
+        web.evaluateJavascript("(function(){var q=window.__nepalTheaterQuality;if(q&&typeof q.stop==='function')q.stop();})()", null);
+    }
+
+    private void yieldQualityMenu() {
+        if (!qualityInstalled || web == null || destroyed || spec.originFor(web.getUrl()) == null) return;
+        // Native Play/Pause while waiting must not prevent a later quality choice. Yield only
+        // active settings work so user navigation wins; this never sends a playback command.
+        web.evaluateJavascript("(function(){var q=window.__nepalTheaterQuality;"
+                + "if(q&&typeof q.getState==='function'&&q.getState().phase==='selecting'"
+                + "&&typeof q.stop==='function')q.stop();})()", null);
+    }
+
     private void leaveFullscreen() {
         if (fullscreenView == null) return;
         fullscreenHost.removeAllViews();
@@ -447,6 +716,7 @@ public final class EmbedPlayerActivity extends Activity {
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) yieldQualityMenu();
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN && foreground && fullscreenView == null
                 && !providerNavigation && controls.getVisibility() != View.VISIBLE && !touchExplorationEnabled()) {
             revealingTouch = true;
@@ -461,6 +731,7 @@ public final class EmbedPlayerActivity extends Activity {
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) yieldQualityMenu();
         int key = event.getKeyCode();
         if (key == revealKey) {
             if (event.getAction() == KeyEvent.ACTION_UP) revealKey = -1;
@@ -517,13 +788,24 @@ public final class EmbedPlayerActivity extends Activity {
                 initialLoadPending = false;
                 clearedInBackground = false;
                 loadPlayer();
-            } else if (loaded && controls.getVisibility() == View.VISIBLE) showControls(false);
+            } else if (loaded) {
+                if (controls.getVisibility() == View.VISIBLE) showControls(false);
+                startQualityPreference();
+                startPlaybackFeatures();
+                handler.removeCallbacks(progressTask);
+                handler.post(progressTask);
+            }
         }
     }
 
     @Override protected void onPause() {
+        captureProgress();
+        stopPlaybackFeatures();
+        stopQualityPreference();
         command("pause", 0);
         foreground = false;
+        if (subtitlesDialog != null) subtitlesDialog.dismiss();
+        handler.removeCallbacks(progressTask);
         revealKey = -1;
         revealingTouch = false;
         handler.removeCallbacks(hideControlsTask);
@@ -542,6 +824,9 @@ public final class EmbedPlayerActivity extends Activity {
     }
 
     @Override protected void onStop() {
+        stopPlaybackFeatures();
+        stopQualityPreference();
+        handler.removeCallbacks(progressTask);
         foreground = false;
         handler.removeCallbacks(loadTimeout);
         handler.removeCallbacks(hideControlsTask);
@@ -559,7 +844,10 @@ public final class EmbedPlayerActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        stopPlaybackFeatures();
+        stopQualityPreference();
         destroyed = true;
+        if (subtitlesDialog != null) subtitlesDialog.dismiss();
         handler.removeCallbacksAndMessages(null);
         leaveFullscreen();
         if (web != null) {
