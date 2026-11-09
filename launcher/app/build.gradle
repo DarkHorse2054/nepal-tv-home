@@ -37,6 +37,6 @@ dependencies {
     implementation 'androidx.dynamicanimation:dynamicanimation:1.0.0'
     // 4.12 supports this launcher's Android 7 / compileSdk 34 toolchain. Newer Android AARs
     // currently require compileSdk 37; keep this bounded LAN client on the compatible JVM artifact.
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.squareup.okhttp3:okhttp:5.5.1'
     testImplementation 'junit:junit:4.13.2'
 }
